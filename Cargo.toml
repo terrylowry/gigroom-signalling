@@ -1,0 +1,27 @@
+[package]
+name = "gigroom-signalling"
+version = "0.1.0"
+edition = "2021"
+authors = ["Nirbheek Chauhan <nirbheek@centricular.com>"]
+license = "Proprietary"
+description = "GigRoom signalling server"
+rust-version = "1.70"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+env_logger = "0.8"
+http = "0.2"
+futures = "0.3"
+log = "0.4"
+pin-project-lite = "0.2"
+serde_json = "1.0"
+thiserror = "1"
+tokio = { version = "1", features = ["fs", "io-util", "macros", "rt-multi-thread", "time"] }
+tokio-native-tls = "0.3.0"
+tokio-tungstenite = { version = "0.20", features = ["native-tls"] }
+uuid = { version = "1", features = ["v4"] }
+
+[[bin]]
+name = "signalling-server"
+path = "src/bin/server.rs"
