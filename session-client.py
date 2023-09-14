@@ -77,7 +77,7 @@ class Context:
         responses = []
         replies = []
         try:
-            while not is_response:
+            while True:
                 reply = json.loads(await self.ws.recv())
                 for rsp in reply:
                     if rsp['type'] == 'response':
@@ -91,6 +91,8 @@ class Context:
                             if req['request_id'] == rsp['request_id']:
                                 print(f"!!! Request {req} failed")
                                 print(f">>> {rsp}")
+                if is_response or requests is None:
+                    break
         except (ValueError, TypeError):
             print(reply)
             raise
@@ -119,7 +121,13 @@ class Context:
         print(f'<<< {responses}')
         if replies:
             print(f'<<< {replies}')
-        await asyncio.sleep(60)
+
+        print("Waiting for other messages")
+        while True:
+            responses, replies = await self.check_responses(None)
+            print(f'<<< {responses}')
+            if replies:
+                print(f'<<< {replies}')
 
 
 def reply_sdp_ice(msg):
