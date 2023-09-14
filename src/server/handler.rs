@@ -89,7 +89,7 @@ impl Handler {
     fn make_request(
         req_type: &str,
         room_id: Option<&str>,
-        args: &[&str],
+        args: &[Value],
     ) -> Value
     {
         match room_id {
@@ -115,7 +115,7 @@ impl Handler {
 
     fn make_response(
         code: HttpCode,
-        args: Option<Vec<String>>,
+        args: Option<Vec<Value>>,
         request_id: Option<&str>,
     ) -> Value
     {
@@ -154,7 +154,7 @@ impl Handler {
                 (reason, HttpCode::BAD_REQUEST)
             },
         };
-        Self::make_response(code, Some(vec![arg]), request_id)
+        Self::make_response(code, Some(vec![serde_json::Value::String(arg)]), request_id)
     }
 
     fn all_responses(
@@ -175,8 +175,8 @@ impl Handler {
         futures::future::join_all(futs).await;
     }
 
-    fn room_request_builder(
-        args: &[&str],
+    fn room_members_request_builder(
+        args: &[Value],
         room_id: &str,
         room: &mut Room,
         server_state: State,
@@ -208,8 +208,11 @@ impl Handler {
     {
         match rooms.remove(room_id) {
             Some(mut room) => {
-                Self::room_request_builder(&["room", "destroyed", room_id], room_id, &mut room,
-                                           server_state.clone())
+                Self::room_members_request_builder(
+                    &[
+                        Value::String("room".to_string()),
+                        Value::String("destroyed".to_string()),
+                    ], room_id, &mut room, server_state.clone())
             },
             None => {
                 debug!("Room already destroyed");
@@ -223,14 +226,18 @@ impl Handler {
         room_id: &str,
         room: &mut Room,
         server_state: State,
-    ) -> Option<(Vec<(String, mpsc::Sender<String>)>, Vec<String>)>
+    ) -> Option<(Vec<(String, mpsc::Sender<String>)>, Vec<Value>)>
     {
         debug_assert!(room.allowed_members.contains(member));
-        let ret = Self::room_request_builder(&["room", "joined", member], room_id, room,
-                                             server_state);
+        let ret = Self::room_members_request_builder(
+            &[
+                Value::String("room".to_string()),
+                Value::String("joined".to_string()),
+                Value::String(member.to_string())
+            ], room_id, room, server_state);
         let other_members = room.current_members
             .iter()
-            .map(|s| s.to_string())
+            .map(|s| Value::String(s.to_string()))
             .collect();
         // Add peer to the room
         room.current_members.insert(member.to_string());
@@ -249,8 +256,12 @@ impl Handler {
         if room.current_members.len() == 0 {
             Self::room_destroy(room_id, rooms, server_state.clone())
         } else {
-            Self::room_request_builder(&["room", "left", member], room_id, room,
-                                       server_state.clone())
+            Self::room_members_request_builder(
+                &[
+                    Value::String("room".to_string()),
+                    Value::String("left".to_string()),
+                    Value::String(member.to_string())
+                ], room_id, room, server_state.clone())
         }
     }
 
@@ -273,13 +284,14 @@ impl Handler {
                     .identified
                     .get(id.as_str());
                 if let Some(peer) = maybe_peer {
-                    // We can't use room_request_builder() here because `msg` is not a string
-                    let msg = json!([{
-                        "type": "request",
-                        "room_id": room_id,
-                        "args": ["room", "message", msg, from_id],
-                        "request_id": "",
-                    }]);
+                    let msg = Self::make_request(
+                        "room", Some(room_id),
+                        &[
+                            Value::String("room".to_string()),
+                            Value::String("message".to_string()),
+                            msg.clone(),
+                            Value::String(from_id.to_string()),
+                        ]);
                     Some((msg.to_string(), peer.tx.clone()))
                 } else {
                     None
@@ -305,16 +317,17 @@ impl Handler {
                 let args = match arg0 {
                     Some("list") => {
                         let rooms = server_state.rooms.lock().unwrap();
-                        let args: Vec<String> = rooms
+                        let args: Vec<Value> = rooms
                             .iter()
                             .filter(|(_, room)| room.allowed_members.contains(peer_id))
-                            .map(|(id, _)| id.to_owned())
+                            .map(|(id, _)| Value::String(id.to_owned()))
                             .collect();
                         args
                     }
                     Some(_) => {
+                        let args = vec![Value::String("room_id not specified".to_string())];
                         return Self::make_response(HttpCode::BAD_REQUEST,
-                                                   Some(vec!["room_id not specified".to_string()]),
+                                                   Some(args),
                                                    Some(request_id));
                     }
                     None => {
@@ -507,7 +520,7 @@ impl Handler {
             .unzip().0
             .unwrap_or(HttpCode::OK);
         let args = response_args
-            .map_or_else(|(error, _)| Some(vec![error.to_string()]),
+            .map_or_else(|(error, _)| Some(vec![Value::String(error.to_string())]),
                          |v| v);
         Self::make_response(code, args, Some(request_id))
     }
