@@ -320,7 +320,14 @@ impl Handler {
                         let args: Vec<Value> = rooms
                             .iter()
                             .filter(|(_, room)| room.allowed_members.contains(peer_id))
-                            .map(|(id, _)| Value::String(id.to_owned()))
+                            .map(|(id, room)| {
+                                let mut v = serde_json::Map::new();
+                                v.insert("room_id".to_string(), Value::String(id.to_string()));
+                                v.insert("creator".to_string(), Value::String(room.creator.clone()));
+                                let active = room.current_members.len() > 0;
+                                v.insert("active".to_string(), Value::Bool(active));
+                                Value::Object(v)
+                            })
                             .collect();
                         args
                     }
