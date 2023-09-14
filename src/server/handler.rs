@@ -223,14 +223,18 @@ impl Handler {
         room_id: &str,
         room: &mut Room,
         server_state: State,
-    ) -> Vec<(String, mpsc::Sender<String>)>
+    ) -> Option<(Vec<(String, mpsc::Sender<String>)>, Vec<String>)>
     {
         debug_assert!(room.allowed_members.contains(member));
         let ret = Self::room_request_builder(&["room", "joined", member], room_id, room,
                                              server_state);
+        let other_members = room.current_members
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         // Add peer to the room
         room.current_members.insert(member.to_string());
-        ret
+        Some((ret, other_members))
     }
 
     fn room_remove_member(
@@ -428,10 +432,11 @@ impl Handler {
                     }
                 };
                 match requests {
-                    Ok(reqs) => {
+                    Ok(Some((reqs, response))) => {
                         Self::send_requests(reqs).await;
-                        Ok(None)
+                        Ok(Some(response))
                     },
+                    Ok(None) => Ok(None),
                     Err(e) => Err(e),
                 }
             }
