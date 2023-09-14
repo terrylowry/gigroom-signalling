@@ -331,7 +331,7 @@ impl Handler {
                 // TODO: Check that we're not overwriting an existing room
                 let mut rooms = server_state.rooms.lock().unwrap();
                 if rooms.contains_key(room_id) {
-                    Err((HttpCode::FORBIDDEN, "Forbidden"))
+                    Err((HttpCode::FORBIDDEN, "Room already exists"))
                 } else {
                     debug!("{}", format!("{rooms:#?}"));
                     rooms.insert(room_id.to_string(), Room {
