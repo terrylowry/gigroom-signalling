@@ -88,16 +88,29 @@ impl Handler {
 
     fn make_request(
         req_type: &str,
+        room_id: Option<&str>,
         args: &[&str],
     ) -> Value
     {
-        json!([{
-            "type": req_type,
-            "args": args,
-            // This is unused right now, but we might need this for requests that need
-            // a response from the client (none right now).
-            "request_id": "",
-        }])
+        match room_id {
+            Some(room_id) => {
+                json!([{
+                    "type": req_type,
+                    "room_id": room_id,
+                    "args": args,
+                    // This is unused right now, but we might need this for requests that need
+                    // a response from the client (none right now).
+                    "request_id": "",
+                }])
+            }
+            None => {
+                json!([{
+                    "type": req_type,
+                    "args": args,
+                    "request_id": "",
+                }])
+            }
+        }
     }
 
     fn make_response(
@@ -164,6 +177,7 @@ impl Handler {
 
     fn room_request_builder(
         args: &[&str],
+        room_id: &str,
         room: &mut Room,
         server_state: State,
     ) -> Vec<(String, mpsc::Sender<String>)>
@@ -176,7 +190,7 @@ impl Handler {
                     .identified
                     .get(id.as_str());
                 if let Some(peer) = maybe_peer {
-                    let msg = Self::make_request("room", args).to_string();
+                    let msg = Self::make_request("room", Some(room_id), args).to_string();
                     Some((msg, peer.tx.clone()))
                 } else {
                     None
@@ -194,7 +208,7 @@ impl Handler {
     {
         match rooms.remove(room_id) {
             Some(mut room) => {
-                Self::room_request_builder(&["room", "destroyed", room_id], &mut room,
+                Self::room_request_builder(&["room", "destroyed", room_id], room_id, &mut room,
                                            server_state.clone())
             },
             None => {
@@ -206,12 +220,14 @@ impl Handler {
 
     fn room_add_member(
         member: &str,
+        room_id: &str,
         room: &mut Room,
         server_state: State,
     ) -> Vec<(String, mpsc::Sender<String>)>
     {
         debug_assert!(room.allowed_members.contains(member));
-        let ret = Self::room_request_builder(&["room", "joined", member], room, server_state);
+        let ret = Self::room_request_builder(&["room", "joined", member], room_id, room,
+                                             server_state);
         // Add peer to the room
         room.current_members.insert(member.to_string());
         ret
@@ -229,12 +245,14 @@ impl Handler {
         if room.current_members.len() == 0 {
             Self::room_destroy(room_id, rooms, server_state.clone())
         } else {
-            Self::room_request_builder(&["room", "left", member], room, server_state.clone())
+            Self::room_request_builder(&["room", "left", member], room_id, room,
+                                       server_state.clone())
         }
     }
 
     fn room_craft_message(
         from_id: &str,
+        room_id: &str,
         room: &mut Room,
         msg: &Value,
         server_state: State,
@@ -251,8 +269,10 @@ impl Handler {
                     .identified
                     .get(id.as_str());
                 if let Some(peer) = maybe_peer {
+                    // We can't use room_request_builder() here because `msg` is not a string
                     let msg = json!([{
                         "type": "request",
+                        "room_id": room_id,
                         "args": ["room", "message", msg, from_id],
                         "request_id": "",
                     }]);
@@ -399,7 +419,7 @@ impl Handler {
                         Some(room) => {
                             if room.allowed_members.contains(peer_id) {
                                 info!("Joining room {}", room_id);
-                                Ok(Self::room_add_member(peer_id, room, server_state.clone()))
+                                Ok(Self::room_add_member(peer_id, room_id, room, server_state.clone()))
                             } else {
                                 Err((HttpCode::FORBIDDEN, "Not allowed to join room"))
                             }
@@ -449,7 +469,7 @@ impl Handler {
                         match rooms.get_mut(room_id) {
                             Some(room) => {
                                 if room.current_members.contains(peer_id) {
-                                    Ok(Self::room_craft_message(peer_id, room, msg,
+                                    Ok(Self::room_craft_message(peer_id, room_id, room, msg,
                                                                 server_state.clone()))
                                 } else {
                                     Err((HttpCode::BAD_REQUEST, "Not a member of room"))
