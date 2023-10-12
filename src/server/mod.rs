@@ -30,10 +30,11 @@ pub struct Peers {
     identified: HashMap<PeerID, Peer>,
 }
 
-type RoomID = String;
+type RoomID = Uuid;
 #[derive(Debug)]
 pub struct Room {
     creator: PeerID,
+    name: String,
     allowed_members: HashSet<PeerID>,
     current_members: HashSet<PeerID>,
 }

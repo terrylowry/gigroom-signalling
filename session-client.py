@@ -21,7 +21,8 @@ parser.add_argument('--allow-peer-ids', default=[], type=str.split, help='Peer I
 options = parser.parse_args(sys.argv[1:])
 
 SERVER_ADDR = options.url
-DEFAULT_ROOM_ID = 'some-room-id'
+DEFAULT_ROOM_ID = '00000000-0000-0000-0000-000000000000'
+DEFAULT_ROOM_NAME = 'Some Room Name'
 print(options.allow_peer_ids)
 
 sslctx = None
@@ -52,7 +53,7 @@ class Context:
         return self.build_request(['list'])
 
     def create_room(self, room_id=DEFAULT_ROOM_ID):
-        return self.build_request(['create'], room_id=room_id)
+        return self.build_request(['create', DEFAULT_ROOM_NAME], room_id=room_id)
 
     def destroy_room(self, room_id=DEFAULT_ROOM_ID):
         return self.build_request(['destroy'], room_id=room_id)
