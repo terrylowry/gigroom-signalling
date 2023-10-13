@@ -176,15 +176,17 @@ impl Handler {
         futures::future::join_all(futs).await;
     }
 
-    fn room_members_request_builder(
-        args: &[Value],
+    // Build a vector of requests that will be sent to the iterator of member IDs
+    fn members_request_builder<'a, I>(
+        members: I,
         room_id: &Uuid,
-        room: &mut Room,
+        args: &[Value],
         peers: &Arc<Mutex<Peers>>,
     ) -> Vec<(String, mpsc::Sender<String>)>
+    where
+        I: Iterator<Item = &'a String>
     {
-        let requests = room.current_members
-            .iter()
+        let requests = members
             .filter_map(|id| {
                 let peers = peers.lock().unwrap();
                 let maybe_peer = peers
@@ -201,6 +203,16 @@ impl Handler {
         requests
     }
 
+    fn room_members_request_builder(
+        room: &mut Room,
+        room_id: &Uuid,
+        args: &[Value],
+        peers: &Arc<Mutex<Peers>>,
+    ) -> Vec<(String, mpsc::Sender<String>)>
+    {
+        Self::members_request_builder(room.current_members.iter(), room_id, args, peers)
+    }
+
     fn room_destroy(
         room_id: &Uuid,
         rooms: &mut std::sync::MutexGuard<'_, HashMap<Uuid, Room>>,
@@ -210,10 +222,12 @@ impl Handler {
         match rooms.remove(room_id) {
             Some(mut room) => {
                 Self::room_members_request_builder(
+                    &mut room, room_id,
                     &[
                         Value::String("room".to_string()),
                         Value::String("destroyed".to_string()),
-                    ], room_id, &mut room, &peers)
+                    ],
+                    peers)
             },
             None => {
                 debug!("Room already destroyed");
@@ -232,11 +246,13 @@ impl Handler {
         debug_assert!(room.allowed_members.contains(member));
         let (ret, args) = if !room.current_members.is_empty() {
             let ret = Self::room_members_request_builder(
+                room, room_id,
                 &[
                     Value::String("room".to_string()),
                     Value::String("joined".to_string()),
                     Value::String(member.to_string())
-                ], room_id, room, peers);
+                ],
+                peers);
             let other_members = room.current_members
                 .iter()
                 .map(|s| Value::String(s.to_string()))
@@ -265,51 +281,40 @@ impl Handler {
                 Self::room_destroy(room_id, rooms, peers)
             } else {
                 Self::room_members_request_builder(
+                    room, room_id,
                     &[
                         Value::String("room".to_string()),
                         Value::String("left".to_string()),
                         Value::String(member.to_string())
-                    ], room_id, room, peers)
+                    ], peers)
             }
         } else {
             vec![]
         }
     }
 
-    fn room_craft_message(
+    fn room_craft_messages(
         from_id: &str,
         room_id: &Uuid,
-        room: &mut Room,
+        room: &Room,
         msg: &Value,
         peers: &Arc<Mutex<Peers>>,
-    ) -> Option<Vec<(String, mpsc::Sender<String>)>>
+    ) -> Vec<(String, mpsc::Sender<String>)>
     {
         // Collect a list of room members that need to be notified that this peer has been kicked
         // out of the room
-        let messages = room.current_members
-            .iter()
-            .filter(|id| *id == from_id)
-            .filter_map(|id| {
-                let peers = peers.lock().unwrap();
-                let maybe_peer = peers
-                    .identified
-                    .get(id.as_str());
-                if let Some(peer) = maybe_peer {
-                    let msg = Self::make_request(
-                        Some(room_id),
-                        &[
-                            Value::String("room".to_string()),
-                            Value::String("message".to_string()),
-                            msg.clone(),
-                            Value::String(from_id.to_string()),
-                        ]);
-                    Some((msg.to_string(), peer.tx.clone()))
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<(String, mpsc::Sender<String>)>>();
-        Some(messages)
+        Self::members_request_builder(
+            room.current_members
+                .iter()
+                .filter(|id| *id == from_id),
+            room_id,
+            &[
+                Value::String("room".to_string()),
+                Value::String("message".to_string()),
+                msg.clone(),
+                Value::String(from_id.to_string()),
+            ],
+            peers)
     }
 
     async fn handle_room(
@@ -523,8 +528,8 @@ impl Handler {
                         match rooms.get_mut(&room_id) {
                             Some(room) => {
                                 if room.current_members.contains(peer_id) {
-                                    Ok(Self::room_craft_message(peer_id, &room_id, room, msg,
-                                                                &server_state.peers))
+                                    Ok(Some(Self::room_craft_messages(peer_id, &room_id, room, msg,
+                                                &server_state.peers)))
                                 } else {
                                     Err((HttpCode::BAD_REQUEST, "Not a member of room"))
                                 }
