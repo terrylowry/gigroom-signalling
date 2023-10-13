@@ -19,8 +19,8 @@ use handler::Handler;
 type PeerID = String;
 #[derive(Debug)]
 pub struct Peer {
-    conn_handle: task::JoinHandle<Result<(), Error>>,
-    cmdloop_handle: task::JoinHandle<Result<(), Error>>,
+    _conn_handle: task::JoinHandle<Result<(), Error>>,
+    _cmdloop_handle: task::JoinHandle<Result<(), Error>>,
     tx: mpsc::Sender<String>,
 }
 
@@ -170,11 +170,11 @@ impl Server {
         let (tx, tx_src) = mpsc::channel::<String>(1000);
         let (mut rx_sink, rx) = mpsc::channel::<String>(1000);
         let (ident_sink, ident_src) = oneshot::channel::<String>();
-        let cmdloop_handle = task::spawn(Handler::cmd_loop(rx, tx.clone(), ident_src,
+        let _cmdloop_handle = task::spawn(Handler::cmd_loop(rx, tx.clone(), ident_src,
                                                            self.state.clone()));
 
         let state_clone = self.state.clone();
-        let conn_handle = task::spawn(async move {
+        let _conn_handle = task::spawn(async move {
             let mut peer_id = None;
             let (mut ws_sender, ws_receiver) = ws_conn.split();
             let mut incoming = Box::pin(ws_receiver.map(|msg| msg.map(|m| WsMessage::Incoming(m))));
@@ -247,8 +247,8 @@ impl Server {
         self.state.peers.lock().unwrap().connected.insert(
             temp_id_clone,
             Peer {
-                conn_handle,
-                cmdloop_handle,
+                _conn_handle,
+                _cmdloop_handle,
                 tx,
             },
         );
