@@ -89,7 +89,6 @@ impl Handler {
     }
 
     fn make_request(
-        req_type: &str,
         room_id: Option<&Uuid>,
         args: &[Value],
     ) -> Value
@@ -97,7 +96,7 @@ impl Handler {
         match room_id {
             Some(room_id) => {
                 json!([{
-                    "type": req_type,
+                    "type": "request",
                     "room_id": room_id,
                     "args": args,
                     // This is unused right now, but we might need this for requests that need
@@ -107,7 +106,7 @@ impl Handler {
             }
             None => {
                 json!([{
-                    "type": req_type,
+                    "type": "request",
                     "args": args,
                     "request_id": "",
                 }])
@@ -192,7 +191,7 @@ impl Handler {
                     .identified
                     .get(id.as_str());
                 if let Some(peer) = maybe_peer {
-                    let msg = Self::make_request("room", Some(room_id), args).to_string();
+                    let msg = Self::make_request(Some(room_id), args).to_string();
                     Some((msg, peer.tx.clone()))
                 } else {
                     None
@@ -297,7 +296,7 @@ impl Handler {
                     .get(id.as_str());
                 if let Some(peer) = maybe_peer {
                     let msg = Self::make_request(
-                        "room", Some(room_id),
+                        Some(room_id),
                         &[
                             Value::String("room".to_string()),
                             Value::String("message".to_string()),
