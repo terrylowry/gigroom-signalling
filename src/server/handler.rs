@@ -231,19 +231,25 @@ impl Handler {
     ) -> Option<(Vec<(String, mpsc::Sender<String>)>, Vec<Value>)>
     {
         debug_assert!(room.allowed_members.contains(member));
-        let ret = Self::room_members_request_builder(
-            &[
-                Value::String("room".to_string()),
-                Value::String("joined".to_string()),
-                Value::String(member.to_string())
-            ], room_id, room, server_state);
-        let other_members = room.current_members
-            .iter()
-            .map(|s| Value::String(s.to_string()))
-            .collect();
+        let (ret, args) = if !room.current_members.is_empty() {
+            let ret = Self::room_members_request_builder(
+                &[
+                    Value::String("room".to_string()),
+                    Value::String("joined".to_string()),
+                    Value::String(member.to_string())
+                ], room_id, room, peers);
+            let other_members = room.current_members
+                .iter()
+                .map(|s| Value::String(s.to_string()))
+                .collect();
+            (ret, other_members)
+        } else {
+            // No notification necessary, no members of the room
+            (vec![], vec![])
+        };
         // Add peer to the room
         room.current_members.insert(member.to_string());
-        Some((ret, other_members))
+        Some((ret, args))
     }
 
     fn room_remove_member(
