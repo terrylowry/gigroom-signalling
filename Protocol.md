@@ -27,7 +27,7 @@ The `IDENTIFY` request is sent in plaintext so that the initial processing is ch
 
 Example request and response:
 
-```json
+```js
 [
     {
         "type": "request",
@@ -41,7 +41,7 @@ Example request and response:
 ]
 ```
 
-```json
+```js
 [
     {
         "type": "response",
@@ -95,7 +95,7 @@ Rooms are destroyed when they have no participants. Rooms can be destroyed at an
 
 Client request:
 
-```json
+```js
 [
     {
         "type": "request",
@@ -128,7 +128,7 @@ Client request:
 Server response (one success, two failures):
 
 
-```json
+```js
 [
     {
         "type": "response",
@@ -170,7 +170,7 @@ When a client leaves a room, all other peers receive a Server → Client request
 
 Clients may join, leave, and rejoin a room at any point during a call.
 
-```json
+```js
 [
     {
         "type": "request",
@@ -188,7 +188,7 @@ Clients may join, leave, and rejoin a room at any point during a call.
 Success response:
 
 
-```json
+```js
 [
     {
         "type": "response",
@@ -202,7 +202,7 @@ Success response:
 
 Failure response:
 
-```json
+```js
 [
     {
         "type": "response",
@@ -223,7 +223,7 @@ The **`disallow`** request ignores peer IDs that aren't already in the allow-lis
 
 If you **`disallow`** a user who is already in the room, the user will be kicked out as if they had sent a **`room leave`** request.
 
-```json
+```js
 [
     {
         "type": "request",
@@ -238,7 +238,7 @@ If you **`disallow`** a user who is already in the room, the user will be kicked
 Success response:
 
 
-```json
+```js
 [
     {
         "type": "response",
@@ -261,7 +261,7 @@ On receipt of this request, the server will send the specified message to all sp
 
 You are expected to use this to send SDP, ICE, or any other message to another peer, as part of the negotiation to start a call.
 
-```json
+```js
 [
     {
         "type": "request",
@@ -289,7 +289,7 @@ You are expected to use this to send SDP, ICE, or any other message to another p
 Success response:
 
 
-```json
+```js
 [
     {
         "type": "response",
@@ -312,7 +312,7 @@ The specified room has become active because someone joined it for the first tim
 
 You will receive a message like this:
 
-```json
+```js
 [
     {
         "type": "request",
@@ -333,7 +333,7 @@ The specified client has joined or left the specified room that you are a member
 
 You will receive a message like this:
 
-```json
+```js
 [
     {
         "type": "request",
@@ -353,7 +353,7 @@ This means the group call has ended. You will receive this message in two cases:
 
 You will receive a message like this:
 
-```json
+```js
 [
     {
         "type": "request",
@@ -370,7 +370,7 @@ A member of the room has sent you a JSON message, usually for negotiation (SDP o
 
 You will receive a message like this:
 
-```json
+```js
 [
     {
         "type": "request",
@@ -395,7 +395,7 @@ You will receive a message like this:
 
 ## Multiple Request/Response Example
 
-```json
+```js
 [
     {
         "type": "request",
@@ -429,7 +429,7 @@ You will receive a message like this:
 ```
 
 
-```json
+```js
 [
     {
         "type": "response",
