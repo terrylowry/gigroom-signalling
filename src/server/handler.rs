@@ -253,16 +253,20 @@ impl Handler {
     ) -> Vec<(String, mpsc::Sender<String>)>
     {
         let room = rooms.get_mut(room_id).unwrap();
-        room.current_members.remove(member);
-        if room.current_members.len() == 0 {
-            Self::room_destroy(room_id, rooms, server_state.clone())
+        room.allowed_members.remove(member);
+        if room.current_members.remove(member) {
+            if room.current_members.len() == 0 {
+                Self::room_destroy(room_id, rooms, server_state.clone())
+            } else {
+                Self::room_members_request_builder(
+                    &[
+                        Value::String("room".to_string()),
+                        Value::String("left".to_string()),
+                        Value::String(member.to_string())
+                    ], room_id, room, server_state.clone())
+            }
         } else {
-            Self::room_members_request_builder(
-                &[
-                    Value::String("room".to_string()),
-                    Value::String("left".to_string()),
-                    Value::String(member.to_string())
-                ], room_id, room, server_state.clone())
+            vec![]
         }
     }
 
