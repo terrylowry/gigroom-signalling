@@ -204,7 +204,7 @@ impl Handler {
     }
 
     fn room_members_request_builder(
-        room: &mut Room,
+        room: &Room,
         room_id: &Uuid,
         args: &[Value],
         peers: &Arc<Mutex<Peers>>,
@@ -220,9 +220,13 @@ impl Handler {
     ) -> Vec<(String, mpsc::Sender<String>)>
     {
         match rooms.remove(room_id) {
-            Some(mut room) => {
-                Self::room_members_request_builder(
-                    &mut room, room_id,
+            Some(room) => {
+                Self::members_request_builder(
+                    // Send the message to both current and allowed members
+                    room.current_members
+                        .iter()
+                        .chain(room.allowed_members.iter()),
+                    room_id,
                     &[
                         Value::String("room".to_string()),
                         Value::String("destroyed".to_string()),
@@ -259,8 +263,10 @@ impl Handler {
                 .collect();
             (ret, other_members)
         } else {
-            // No notification necessary, no members of the room
-            (vec![], vec![])
+            // There were no members in the room, which means the room went from inactive to active
+            // and we need to notify allowed members
+            let ret = Self::allowed_members_craft_active_messages(&room_id, room, peers);
+            (ret, vec![])
         };
         // Add peer to the room
         room.current_members.insert(member.to_string());
@@ -313,6 +319,21 @@ impl Handler {
                 Value::String("message".to_string()),
                 msg.clone(),
                 Value::String(from_id.to_string()),
+            ],
+            peers)
+    }
+
+    fn allowed_members_craft_active_messages(
+        room_id: &Uuid,
+        room: &Room,
+        peers: &Arc<Mutex<Peers>>,
+    ) -> Vec<(String, mpsc::Sender<String>)> {
+        Self::members_request_builder(
+            room.allowed_members.iter(),
+            room_id,
+            &[
+                Value::String("room".to_string()),
+                Value::String("active".to_string()),
             ],
             peers)
     }

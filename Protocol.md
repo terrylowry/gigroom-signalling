@@ -306,9 +306,9 @@ In some cases, the server will send _requests_ to the client instead of the usua
 
 A response from the client is **not** expected for any requests at the moment.
 
-### `room joined` | `left` (server)
+### `room active` (server)
 
-The specified client has joined or left the specified room that you are a member of.
+The specified room has become active because someone joined it for the first time, meaning that a call has begun.
 
 You will receive a message like this:
 
@@ -321,7 +321,24 @@ You will receive a message like this:
         // The Room ID that this command refers to
         // in this case, this is "Violin Ensemble"
         "room_id": "dca2c32c-caa6-4ed6-8b86-1c0cd7339a4c",
-        // Server request goes here
+        // Server message goes here
+        "args": ["room", "active"]
+    },
+]
+```
+
+### `room joined` | `left` (server)
+
+The specified client has joined or left the specified room that you are a member of.
+
+You will receive a message like this:
+
+```json
+[
+    {
+        "type": "request",
+        "request_id": "",
+        "room_id": "dca2c32c-caa6-4ed6-8b86-1c0cd7339a4c",
         "args": ["room", "joined", "Lao88"]
     },
 ]
@@ -329,7 +346,10 @@ You will receive a message like this:
 
 ### `room destroyed` (server)
 
-The specified room has been destroyed by the Creator while you were a member of it. This means the group call has ended.
+This means the group call has ended. You will receive this message in two cases:
+
+* The room has been destroyed by the Creator while you were in it or you were in the allowed list
+* The room was destroyed because everyone left the room (which automatically destroys it) while you were in the allowed list but *not* in the room itself (since there is no one remaining in the room to receive a `destroyed` in that case)
 
 You will receive a message like this:
 
@@ -372,8 +392,6 @@ You will receive a message like this:
     },
 ]
 ```
-
-TODO: some kind of server request (notification) that a room you are allowed to join has become active?
 
 ## Multiple Request/Response Example
 
