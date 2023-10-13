@@ -4,12 +4,13 @@ use futures::channel::{mpsc, oneshot};
 use futures::prelude::*;
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 #[allow(unused_imports)]
 use log::{error, warn, info, debug, trace};
 
-use crate::server::{State, Room};
+use crate::server::{State, Room, Peers};
 
 type Requests = Vec<HashMap<String, Value>>;
 type Responses = Vec<Value>;
@@ -76,10 +77,10 @@ impl Handler {
             let mut rooms = server_state.rooms.lock().unwrap();
             for room_id in remove_from_rooms.iter() {
                 requests.extend(Self::room_remove_member(peer_id.as_str(), room_id,
-                                                         &mut rooms, server_state.clone()));
+                                                         &mut rooms, &server_state.peers));
             }
             for room_id in destroy_rooms.iter() {
-                requests.extend(Self::room_destroy(room_id, &mut rooms, server_state.clone()));
+                requests.extend(Self::room_destroy(room_id, &mut rooms, &server_state.peers));
             }
             requests
         };
@@ -180,13 +181,13 @@ impl Handler {
         args: &[Value],
         room_id: &Uuid,
         room: &mut Room,
-        server_state: State,
+        peers: &Arc<Mutex<Peers>>,
     ) -> Vec<(String, mpsc::Sender<String>)>
     {
-        let peers = server_state.peers.lock().unwrap();
         let requests = room.current_members
             .iter()
             .filter_map(|id| {
+                let peers = peers.lock().unwrap();
                 let maybe_peer = peers
                     .identified
                     .get(id.as_str());
@@ -204,7 +205,7 @@ impl Handler {
     fn room_destroy(
         room_id: &Uuid,
         rooms: &mut std::sync::MutexGuard<'_, HashMap<Uuid, Room>>,
-        server_state: State,
+        peers: &Arc<Mutex<Peers>>,
     ) -> Vec<(String, mpsc::Sender<String>)>
     {
         match rooms.remove(room_id) {
@@ -213,7 +214,7 @@ impl Handler {
                     &[
                         Value::String("room".to_string()),
                         Value::String("destroyed".to_string()),
-                    ], room_id, &mut room, server_state.clone())
+                    ], room_id, &mut room, &peers)
             },
             None => {
                 debug!("Room already destroyed");
@@ -226,7 +227,7 @@ impl Handler {
         member: &str,
         room_id: &Uuid,
         room: &mut Room,
-        server_state: State,
+        peers: &Arc<Mutex<Peers>>,
     ) -> Option<(Vec<(String, mpsc::Sender<String>)>, Vec<Value>)>
     {
         debug_assert!(room.allowed_members.contains(member));
@@ -249,21 +250,21 @@ impl Handler {
         member: &str,
         room_id: &Uuid,
         rooms: &mut std::sync::MutexGuard<'_, HashMap<Uuid, Room>>,
-        server_state: State,
+        peers: &Arc<Mutex<Peers>>,
     ) -> Vec<(String, mpsc::Sender<String>)>
     {
         let room = rooms.get_mut(room_id).unwrap();
         room.allowed_members.remove(member);
         if room.current_members.remove(member) {
             if room.current_members.len() == 0 {
-                Self::room_destroy(room_id, rooms, server_state.clone())
+                Self::room_destroy(room_id, rooms, peers)
             } else {
                 Self::room_members_request_builder(
                     &[
                         Value::String("room".to_string()),
                         Value::String("left".to_string()),
                         Value::String(member.to_string())
-                    ], room_id, room, server_state.clone())
+                    ], room_id, room, peers)
             }
         } else {
             vec![]
@@ -275,16 +276,16 @@ impl Handler {
         room_id: &Uuid,
         room: &mut Room,
         msg: &Value,
-        server_state: State,
+        peers: &Arc<Mutex<Peers>>,
     ) -> Option<Vec<(String, mpsc::Sender<String>)>>
     {
-        let peers = server_state.peers.lock().unwrap();
         // Collect a list of room members that need to be notified that this peer has been kicked
         // out of the room
         let messages = room.current_members
             .iter()
             .filter(|id| *id == from_id)
             .filter_map(|id| {
+                let peers = peers.lock().unwrap();
                 let maybe_peer = peers
                     .identified
                     .get(id.as_str());
@@ -390,7 +391,8 @@ impl Handler {
                     match rooms.get_mut(&room_id) {
                         Some(room) => {
                             if room.creator == peer_id {
-                                Ok(Self::room_destroy(&room_id, &mut rooms, server_state.clone()))
+                                Ok(Self::room_destroy(&room_id, &mut rooms,
+                                                      &server_state.peers))
                             } else {
                                 Err((HttpCode::FORBIDDEN, "Forbidden"))
                             }
@@ -429,9 +431,8 @@ impl Handler {
                                         Ok(Some(args
                                             .filter_map(|arg| arg.as_str())
                                             .filter_map(|arg| {
-                                                let state = server_state.clone();
-                                                Some(Self::room_remove_member(arg, &room_id, &mut
-                                                                              rooms, state))
+                                                Some(Self::room_remove_member(arg, &room_id, &mut rooms,
+                                                                              &server_state.peers))
                                             })
                                             .into_iter()
                                             .flatten()
@@ -465,7 +466,8 @@ impl Handler {
                         Some(room) => {
                             if room.allowed_members.contains(peer_id) {
                                 info!("Joining room {}", room_id);
-                                Ok(Self::room_add_member(peer_id, &room_id, room, server_state.clone()))
+                                Ok(Self::room_add_member(peer_id, &room_id, room,
+                                                         &server_state.peers))
                             } else {
                                 Err((HttpCode::FORBIDDEN, "Not allowed to join room"))
                             }
@@ -493,7 +495,7 @@ impl Handler {
                             Err((HttpCode::BAD_REQUEST, "Not a member of room"))
                         } else {
                             Ok(Self::room_remove_member(peer_id, &room_id, &mut rooms,
-                                                        server_state.clone()))
+                                                        &server_state.peers))
                         }
                     }
                 };
@@ -517,7 +519,7 @@ impl Handler {
                             Some(room) => {
                                 if room.current_members.contains(peer_id) {
                                     Ok(Self::room_craft_message(peer_id, &room_id, room, msg,
-                                                                server_state.clone()))
+                                                                &server_state.peers))
                                 } else {
                                     Err((HttpCode::BAD_REQUEST, "Not a member of room"))
                                 }
