@@ -327,15 +327,17 @@ impl Handler {
         )
     }
 
-    async fn handle_room(
-        argv: &[Value],
+    async fn handle_room<'a, I>(
+        mut args: I,
         room_id: Option<&str>,
         request_id: &str,
         peer_id: &str,
         server_state: State,
-    ) -> Value {
-        let mut args = argv.iter();
-        let arg0 = args.next().and_then(|v| v.as_str());
+    ) -> Value
+    where
+        I: Iterator<Item = &'a Value>,
+    {
+        let arg1 = args.next().and_then(|v| v.as_str());
         let room_id = match room_id {
             Some(room_id) => {
                 if let Ok(room_id) = Uuid::try_parse(room_id) {
@@ -350,7 +352,7 @@ impl Handler {
                 }
             }
             None => {
-                let args = match arg0 {
+                let args = match arg1 {
                     Some("list") => {
                         let rooms = server_state.rooms.lock().unwrap();
                         let args: Vec<Value> = rooms
@@ -389,7 +391,7 @@ impl Handler {
                 return Self::make_response(HttpCode::OK, Some(args), Some(request_id));
             }
         };
-        let response_args = match arg0 {
+        let response_args = match arg1 {
             Some("create") => {
                 debug!("{}", format!("{server_state:#?}"));
                 let mut rooms = server_state.rooms.lock().unwrap();
@@ -629,11 +631,21 @@ impl Handler {
                                 Some("Empty args"),
                             )
                         } else {
-                            Self::handle_room(args, room_id, request_id, peer_id, state).await
+                            let mut args = args.iter();
+                            match args.next().and_then(|v| v.as_str()) {
+                                Some("room") => {
+                                    Self::handle_room(args, room_id, request_id, peer_id,
+                                        state).await
+                                },
+                                Some(_) | None => {
+                                    Self::error_response(Some(request_id),
+                                        Some(HttpCode::BAD_REQUEST), Some("Incorrect args"))
+                                },
+                            }
                         }
                     }
-                    (room, request_id, args) => {
-                        error!("{:?} {:?}", room, args);
+                    (type_, request_id, args) => {
+                        error!("{:?} {:?}", type_, args);
                         Self::error_response(request_id, Some(HttpCode::BAD_REQUEST), None)
                     }
                 }

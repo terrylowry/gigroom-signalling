@@ -43,7 +43,7 @@ class Context:
             'type': 'request',
             'request_id': str(self.next_request_id),
             #'room_id': room_id,
-            'args': args
+            'args': ['room'] + args
         }
         self.next_request_id += 1
         req.update(**kwargs)
