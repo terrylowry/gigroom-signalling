@@ -1,17 +1,17 @@
 use anyhow::Error;
-use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::WebSocketStream;
 use futures::channel::{mpsc, oneshot};
-use futures::stream::SplitSink;
 use futures::prelude::*;
+use futures::stream::SplitSink;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::task;
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::WebSocketStream;
 use uuid::Uuid;
 
 #[allow(unused_imports)]
-use log::{error, warn, info, debug, trace};
+use log::{debug, error, info, trace, warn};
 
 mod handler;
 use handler::Handler;
@@ -39,13 +39,13 @@ pub struct Room {
     current_members: HashSet<PeerID>,
 }
 
-#[derive(Clone,Debug)]
+#[derive(Clone, Debug)]
 pub struct State {
     peers: Arc<Mutex<Peers>>,
     rooms: Arc<Mutex<HashMap<RoomID, Room>>>,
 }
 
-#[derive(Clone,Debug)]
+#[derive(Clone, Debug)]
 pub struct Server {
     state: State,
 }
@@ -63,8 +63,7 @@ pub enum WsMessage {
 }
 
 impl Server {
-    pub fn new() -> Self
-    {
+    pub fn new() -> Self {
         let state = State {
             peers: Arc::new(Mutex::new(Peers {
                 connected: HashMap::new(),
@@ -78,7 +77,7 @@ impl Server {
 
     // TODO: This should do authentication using a token that is verified against the auth server.
     async fn identify_peer<S: 'static>(
-        msg: &String,
+        msg: &str,
         state: &State,
         temp_id: &Uuid,
         ws_sender: &mut SplitSink<WebSocketStream<S>, Message>,
@@ -87,11 +86,9 @@ impl Server {
         S: AsyncRead + AsyncWrite + Unpin + Send,
     {
         // If the peer does not successfully identify, we will drop the connection
-        let peer = {
-            state.peers.lock().unwrap().connected.remove(&temp_id)
-        };
+        let peer = { state.peers.lock().unwrap().connected.remove(temp_id) };
         match peer {
-            Some(peer) => match msg.split_once(" ") {
+            Some(peer) => match msg.split_once(' ') {
                 // XXX: Add peer version reporting here
                 Some(("IDENTIFY", got_peer_id)) => {
                     {
@@ -103,19 +100,19 @@ impl Server {
                             // identify
                             return None;
                         }
-                        peers.identified.insert(
-                            got_peer_id.to_string(),
-                            peer,
-                        );
+                        peers.identified.insert(got_peer_id.to_string(), peer);
                     }
-                    ws_sender.send(Message::Text("IDENTIFIED".to_string())).await.ok()?;
+                    ws_sender
+                        .send(Message::Text("IDENTIFIED".to_string()))
+                        .await
+                        .ok()?;
                     Some(got_peer_id.to_string())
                 }
                 _ => {
                     error!("No identification, disconnect");
                     None
                 }
-            }
+            },
             None => {
                 error!("Invalid peer state {:?}, disconnecting", temp_id);
                 None
@@ -151,7 +148,7 @@ impl Server {
 
     pub async fn accept_async<S: 'static>(
         &mut self,
-        stream: S
+        stream: S,
     ) -> Result<(), ServerError>
     where
         S: AsyncRead + AsyncWrite + Unpin + Send,
@@ -165,23 +162,27 @@ impl Server {
         };
 
         let temp_id = Uuid::new_v4();
-        let temp_id_clone = temp_id.clone();
+        let temp_id_clone = temp_id;
 
         let (tx, tx_src) = mpsc::channel::<String>(1000);
         let (mut rx_sink, rx) = mpsc::channel::<String>(1000);
         let (ident_sink, ident_src) = oneshot::channel::<String>();
-        let _cmdloop_handle = task::spawn(Handler::cmd_loop(rx, tx.clone(), ident_src,
-                                                           self.state.clone()));
+        let _cmdloop_handle = task::spawn(Handler::cmd_loop(
+            rx,
+            tx.clone(),
+            ident_src,
+            self.state.clone(),
+        ));
 
         let state_clone = self.state.clone();
         let _conn_handle = task::spawn(async move {
             let mut peer_id = None;
             let (mut ws_sender, ws_receiver) = ws_conn.split();
-            let mut incoming = Box::pin(ws_receiver.map(|msg| msg.map(|m| WsMessage::Incoming(m))));
+            let mut incoming = Box::pin(ws_receiver.map(|msg| msg.map(WsMessage::Incoming)));
             let identified = match incoming.next().await {
                 Some(Ok(WsMessage::Incoming(Message::Text(msg)))) => {
-                    let id = Self::identify_peer(&msg, &state_clone, &temp_id,
-                                                 &mut ws_sender).await;
+                    let id =
+                        Self::identify_peer(&msg, &state_clone, &temp_id, &mut ws_sender).await;
                     if let Some(id) = id {
                         match ident_sink.send(id.clone()) {
                             Ok(()) => {}
@@ -254,5 +255,11 @@ impl Server {
         );
 
         Ok(())
+    }
+}
+
+impl Default for Server {
+    fn default() -> Self {
+        Server::new()
     }
 }

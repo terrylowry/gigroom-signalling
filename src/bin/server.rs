@@ -10,7 +10,7 @@ use tokio_native_tls::native_tls::TlsAcceptor;
 use gigroom_signalling::server::Server;
 
 #[allow(unused_imports)]
-use log::{error, warn, info, debug, trace};
+use log::{debug, error, info, trace, warn};
 
 #[derive(Parser, Debug)]
 #[clap(about, version, author)]
