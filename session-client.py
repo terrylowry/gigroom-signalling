@@ -38,9 +38,9 @@ class Context:
         self.ws = ws
         self.id = peer_id
 
-    def build_request(self, args, type_='room', **kwargs):
+    def build_request(self, args, **kwargs):
         req =  {
-            'type': type_,
+            'type': 'request',
             'request_id': str(self.next_request_id),
             #'room_id': room_id,
             'args': args

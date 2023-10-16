@@ -605,7 +605,7 @@ impl Handler {
                     );
                     info!("{:?}", req);
                     match m {
-                        (Some("room"), Some(request_id), Some(args)) => {
+                        (Some("request"), Some(request_id), Some(args)) => {
                             let room_id = req.get("room_id").and_then(|s| s.as_str());
                             if args.len() == 0 {
                                 Self::error_response(Some(request_id),
