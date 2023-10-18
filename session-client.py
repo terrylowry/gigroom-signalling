@@ -16,7 +16,7 @@ import argparse
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument('--url', default='wss://localhost:8443', help='URL to connect to')
 parser.add_argument('--peer-id', default=str(uuid.uuid4())[:6], help='Peer ID to use')
-parser.add_argument('--allow-peer-ids', default=[], type=str.split, help='Peer IDs to allow in the rooms')
+parser.add_argument('--allow-peer-ids', default=[], type=lambda t: [s.strip() for s in t.split(',')], help='Peer IDs to allow in the rooms')
 
 options = parser.parse_args(sys.argv[1:])
 
@@ -64,6 +64,12 @@ class Context:
     def allow_member(self, peer_ids, room_id=DEFAULT_ROOM_ID):
         return self.build_request(['edit', 'allow'] + peer_ids, room_id=room_id)
 
+    def set_allowed_members(self, peer_ids, room_id=DEFAULT_ROOM_ID):
+        return self.build_request(['set', 'allowed-users'] + peer_ids, room_id=room_id)
+
+    def get_allowed_members(self, room_id=DEFAULT_ROOM_ID):
+        return self.build_request(['get', 'allowed-users'], room_id=room_id)
+
     def message_room(self, peer_ids, room_id=DEFAULT_ROOM_ID):
         return self.build_request(['message', 'SOME_MESSAGE', peer_ids], room_id=room_id)
 
@@ -83,9 +89,9 @@ class Context:
                 for rsp in reply:
                     if rsp['type'] == 'response':
                         is_response = True
-                        responses.append(reply)
+                        responses.extend(reply)
                     if not is_response:
-                        replies.append(reply)
+                        replies.extend(reply)
                         break
                     if rsp['status_code'] != 200:
                         for req in requests:
@@ -115,8 +121,30 @@ class Context:
         print(f'<<< {responses}')
         if replies:
             print(f'<<< {replies}')
+        assert len(responses) == 1
+        assert len(responses[0]['args']) == 1
+        room = responses[0]['args'][0]
+        assert room['creator'] == options.peer_id
+        assert room['room_id'] == DEFAULT_ROOM_ID
+        assert room['room_name'] == DEFAULT_ROOM_NAME
+        assert room['active'] == True
+
         if options.allow_peer_ids:
             await self.send_requests([self.allow_member(options.allow_peer_ids)])
+            responses, replies = await self.send_requests([self.get_allowed_members()])
+            print(f'<<< {responses}')
+            if replies:
+                print(f'<<< {replies}')
+            assert len(responses) == 1
+            assert set(responses[0]["args"]) == set([options.peer_id] + options.allow_peer_ids)
+
+            await self.send_requests([self.set_allowed_members(options.allow_peer_ids)])
+            responses, replies = await self.send_requests([self.get_allowed_members()])
+            print(f'<<< {responses}')
+            if replies:
+                print(f'<<< {replies}')
+            assert len(responses) == 1
+            assert set(responses[0]["args"]) == set([options.peer_id] + options.allow_peer_ids)
         # Send a message to yourself (easy way to test)
         responses, replies = await self.send_requests([self.message_room([self.id])])
         print(f'<<< {responses}')

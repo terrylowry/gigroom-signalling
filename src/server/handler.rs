@@ -498,6 +498,44 @@ impl Handler {
                     Err(e) => Err(e),
                 }
             }
+            Some("get") => match args.next().and_then(|v| v.as_str()) {
+                Some("allowed-users") => {
+                    let rooms = server_state.rooms.lock().unwrap();
+                    match rooms.get(&room_id) {
+                        Some(room) => if room.creator == peer_id {
+                            Ok(Some(room.allowed_members
+                                .iter()
+                                .map(|s| Value::String(s.to_string()))
+                                .collect()))
+                        } else {
+                            Err((HttpCode::FORBIDDEN, "room get not allowed"))
+                        },
+                        None => Err((HttpCode::NOT_FOUND, "No such room")),
+                    }
+                }
+                Some(_) => Err((HttpCode::BAD_REQUEST, "Unknown room get argument")),
+                None => Err((HttpCode::BAD_REQUEST, "Missing room get argument")),
+            },
+            Some("set") => match args.next().and_then(|v| v.as_str()) {
+                Some("allowed-users") => {
+                    let mut rooms = server_state.rooms.lock().unwrap();
+                    match rooms.get_mut(&room_id) {
+                        Some(room) => {
+                            if room.creator == peer_id {
+                                room.allowed_members.retain(|v| *v == room.creator);
+                                room.allowed_members
+                                    .extend(args.filter_map(|v| v.as_str()).map(|s| s.to_string()));
+                                Ok(None)
+                            } else {
+                                Err((HttpCode::FORBIDDEN, "room set not allowed"))
+                            }
+                        }
+                        None => Err((HttpCode::NOT_FOUND, "No such room")),
+                    }
+                }
+                Some(_) => Err((HttpCode::BAD_REQUEST, "Unknown room set argument")),
+                None => Err((HttpCode::BAD_REQUEST, "Missing room set argument")),
+            },
             Some("join") => {
                 let requests = {
                     let mut rooms = server_state.rooms.lock().unwrap();

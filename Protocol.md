@@ -249,6 +249,68 @@ Success response:
 ]
 ```
 
+### `room get allowed-users`
+
+Return a list of peers that are in the allow-list for the specified room.
+
+```js
+[
+    {
+        "type": "request",
+        "request_id": "5",
+        // Room "Violin Ensemble"
+        "room_id": "dca2c32c-caa6-4ed6-8b86-1c0cd7339a4c",
+        "args": ["room", "get", "allowed-users"]
+    }
+]
+```
+
+Success response:
+
+
+```js
+[
+    {
+        "type": "response",
+        "request_id": "5",
+        "status_code": 200,
+        "args": ["Lao88", "Taiki97"]
+    }
+]
+```
+
+### `room set allowed-users`
+
+Instead of using a combination of `room edit allow` and `room edit disallow`, you can use `room set allowed-users` to set it directly. This will disallow all peers that aren't in the list, and allow all peers that are in the list.
+
+The same side-effects as `edit allow|disallow` apply.
+
+```js
+[
+    {
+        "type": "request",
+        "request_id": "6",
+        // Room "Violin Ensemble"
+        "room_id": "dca2c32c-caa6-4ed6-8b86-1c0cd7339a4c",
+        "args": ["room", "set", "allowed-users", "Lao88", "Taiki97", "DambisaM"]
+    }
+]
+```
+
+Success response:
+
+
+```js
+[
+    {
+        "type": "response",
+        "request_id": "6",
+        "status_code": 200,
+        "args": []
+    }
+]
+```
+
 ### `room message`
 
 Send a JSON message to a list of participants.
