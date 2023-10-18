@@ -16,7 +16,7 @@ import argparse
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument('--url', default='wss://localhost:8443', help='URL to connect to')
 parser.add_argument('--peer-id', default=str(uuid.uuid4())[:6], help='Peer ID to use')
-parser.add_argument('--allow-peer-ids', default=[], type=lambda t: [s.strip() for s in t.split(',')], help='Peer IDs to allow in the rooms')
+parser.add_argument('--allow-peer-ids', default=[], type=lambda t: [s.strip() for s in t.split(',')], help='Peer IDs to allow in the rooms (comma separated)')
 
 options = parser.parse_args(sys.argv[1:])
 
