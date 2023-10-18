@@ -233,8 +233,8 @@ impl Handler {
         peers: &Arc<Mutex<Peers>>,
     ) -> Option<(RequestList, Vec<Value>)> {
         debug_assert!(room.allowed_members.contains(member));
-        let (ret, args) = if !room.current_members.is_empty() {
-            let ret = Self::room_members_request_builder(
+        let (reqs, resp) = if !room.current_members.is_empty() {
+            let reqs = Self::room_members_request_builder(
                 room,
                 room_id,
                 &[
@@ -249,16 +249,16 @@ impl Handler {
                 .iter()
                 .map(|s| Value::String(s.to_string()))
                 .collect();
-            (ret, other_members)
+            (reqs, other_members)
         } else {
             // There were no members in the room, which means the room went from inactive to active
             // and we need to notify allowed members
-            let ret = Self::allowed_members_craft_active_messages(room_id, room, peers);
-            (ret, vec![])
+            let reqs = Self::allowed_members_craft_active_messages(room_id, room, peers);
+            (reqs, vec![])
         };
         // Add peer to the room
         room.current_members.insert(member.to_string());
-        Some((ret, args))
+        Some((reqs, resp))
     }
 
     fn room_remove_member(
@@ -425,7 +425,7 @@ impl Handler {
             Some("destroy") => {
                 let requests = {
                     let mut rooms = server_state.rooms.lock().unwrap();
-                    match rooms.get_mut(&room_id) {
+                    match rooms.get(&room_id) {
                         Some(room) => {
                             if room.creator == peer_id {
                                 Ok(Self::room_destroy(
@@ -634,13 +634,14 @@ impl Handler {
                             let mut args = args.iter();
                             match args.next().and_then(|v| v.as_str()) {
                                 Some("room") => {
-                                    Self::handle_room(args, room_id, request_id, peer_id,
-                                        state).await
-                                },
-                                Some(_) | None => {
-                                    Self::error_response(Some(request_id),
-                                        Some(HttpCode::BAD_REQUEST), Some("Incorrect args"))
-                                },
+                                    Self::handle_room(args, room_id, request_id, peer_id, state)
+                                        .await
+                                }
+                                Some(_) | None => Self::error_response(
+                                    Some(request_id),
+                                    Some(HttpCode::BAD_REQUEST),
+                                    Some("Incorrect args"),
+                                ),
                             }
                         }
                     }
