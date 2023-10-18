@@ -15,15 +15,15 @@ import argparse
 
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument('--url', default='wss://localhost:8443', help='URL to connect to')
-parser.add_argument('--peer-id', default=str(uuid.uuid4())[:6], help='Peer ID to use')
-parser.add_argument('--allow-peer-ids', default=[], type=lambda t: [s.strip() for s in t.split(',')], help='Peer IDs to allow in the rooms (comma separated)')
+parser.add_argument('--user-id', default=str(uuid.uuid4())[:6], help='User ID to use')
+parser.add_argument('--allow-user-ids', default=[], type=lambda t: [s.strip() for s in t.split(',')], help='User IDs to allow in the rooms (comma separated)')
 
 options = parser.parse_args(sys.argv[1:])
 
 SERVER_ADDR = options.url
 DEFAULT_ROOM_ID = '00000000-0000-0000-0000-000000000000'
 DEFAULT_ROOM_NAME = 'Some Room Name'
-print(options.allow_peer_ids)
+print(options.allow_user_ids)
 
 sslctx = None
 if SERVER_ADDR.startswith(('wss://', 'https://')):
@@ -33,10 +33,11 @@ if SERVER_ADDR.startswith(('wss://', 'https://')):
     sslctx.verify_mode = ssl.CERT_NONE
 
 class Context:
-    def __init__(self, ws, peer_id):
+    def __init__(self, ws, user_id):
         self.next_request_id = 0
         self.ws = ws
-        self.id = peer_id
+        self.user_id = user_id
+        self.id = None
 
     def build_request(self, args, **kwargs):
         req =  {
@@ -61,17 +62,17 @@ class Context:
     def join_room(self, room_id=DEFAULT_ROOM_ID):
         return self.build_request(['join'], room_id=room_id)
 
-    def allow_member(self, peer_ids, room_id=DEFAULT_ROOM_ID):
-        return self.build_request(['edit', 'allow'] + peer_ids, room_id=room_id)
+    def allow_member(self, user_ids, room_id=DEFAULT_ROOM_ID):
+        return self.build_request(['edit', 'allow'] + user_ids, room_id=room_id)
 
-    def set_allowed_members(self, peer_ids, room_id=DEFAULT_ROOM_ID):
-        return self.build_request(['set', 'allowed-users'] + peer_ids, room_id=room_id)
+    def set_allowed_members(self, user_ids, room_id=DEFAULT_ROOM_ID):
+        return self.build_request(['set', 'allowed-users'] + user_ids, room_id=room_id)
 
     def get_allowed_members(self, room_id=DEFAULT_ROOM_ID):
         return self.build_request(['get', 'allowed-users'], room_id=room_id)
 
-    def message_room(self, peer_ids, room_id=DEFAULT_ROOM_ID):
-        return self.build_request(['message', 'SOME_MESSAGE', peer_ids], room_id=room_id)
+    def message_room(self, user_ids, room_id=DEFAULT_ROOM_ID):
+        return self.build_request(['message', 'SOME_MESSAGE', user_ids], room_id=room_id)
 
     async def send_requests(self, requests):
         s = json.dumps(requests)
@@ -106,9 +107,11 @@ class Context:
         return responses, replies
 
     async def identify(self):
-        await self.ws.send('IDENTIFY ' + self.id)
-        assert(await self.ws.recv() == 'IDENTIFIED')
-        print("Identified")
+        await self.ws.send('IDENTIFY ' + self.user_id)
+        identified, client_id = (await self.ws.recv()).split()
+        assert(identified == 'IDENTIFIED')
+        print(f"Identified as {client_id}")
+        self.id = client_id
 
     async def loop(self):
         await self.identify()
@@ -124,27 +127,27 @@ class Context:
         assert len(responses) == 1
         assert len(responses[0]['args']) == 1
         room = responses[0]['args'][0]
-        assert room['creator'] == options.peer_id
+        assert room['creator'] == options.user_id
         assert room['room_id'] == DEFAULT_ROOM_ID
         assert room['room_name'] == DEFAULT_ROOM_NAME
         assert room['active'] == True
 
-        if options.allow_peer_ids:
-            await self.send_requests([self.allow_member(options.allow_peer_ids)])
+        if options.allow_user_ids:
+            await self.send_requests([self.allow_member(options.allow_user_ids)])
             responses, replies = await self.send_requests([self.get_allowed_members()])
             print(f'<<< {responses}')
             if replies:
                 print(f'<<< {replies}')
             assert len(responses) == 1
-            assert set(responses[0]["args"]) == set([options.peer_id] + options.allow_peer_ids)
+            assert set(responses[0]["args"]) == set([options.user_id] + options.allow_user_ids)
 
-            await self.send_requests([self.set_allowed_members(options.allow_peer_ids)])
+            await self.send_requests([self.set_allowed_members(options.allow_user_ids)])
             responses, replies = await self.send_requests([self.get_allowed_members()])
             print(f'<<< {responses}')
             if replies:
                 print(f'<<< {replies}')
             assert len(responses) == 1
-            assert set(responses[0]["args"]) == set([options.peer_id] + options.allow_peer_ids)
+            assert set(responses[0]["args"]) == set([options.user_id] + options.allow_user_ids)
         # Send a message to yourself (easy way to test)
         responses, replies = await self.send_requests([self.message_room([self.id])])
         print(f'<<< {responses}')
@@ -171,11 +174,11 @@ def send_sdp_ice():
     print("Sent: " + reply)
     return reply
 
-print('Our uid is {!r}'.format(options.peer_id))
+print('Our uid is {!r}'.format(options.user_id))
 
 async def main():
     async with websockets.connect(SERVER_ADDR, ssl=sslctx) as ws:
-        ctx = Context(ws, options.peer_id)
+        ctx = Context(ws, options.user_id)
         await ctx.loop()
 
 try:

@@ -6,11 +6,11 @@ This is a protocol for doing multi-participant "room" calls using the GigRoom si
 
 ## Client identification
 
-Clients must identify themselves immediately upon connecting by sending the following plain-text message: **`IDENTIFY <peer_id>`**
+Clients must identify themselves immediately upon connecting by sending the following plain-text message: **`IDENTIFY <USER_ID>`**
 
-If the identification is accepted, the server will reply with a plain-text message: **`IDENTIFIED`**
+If the identification is accepted, the server will reply with a plain-text message: **`IDENTIFIED <UUID>`** where `<UUID>` is the client ID assigned to your connection.
 
-Note that `<peer_id>` here can contain any characters, including spaces.
+Note that `<USER_ID>` here can contain any characters, including spaces.
 
 This is the only part of the protocol that utilizes plain-text messages. The remaining messages are required to be JSON-formatted.
 
@@ -79,7 +79,7 @@ Clients may send a number of requests to the server and receive responses.
 
 ### `room list`
 
-List all rooms that the client is allowed to join.
+List all rooms that the user is allowed to join.
 
 [See above](#Requests-and-Responses) for a complete example.
 
@@ -87,7 +87,7 @@ List all rooms that the client is allowed to join.
 
 Create or destroy a new room with the specified name (unique ID).
 
-The client that creates the room is designated as the "Creator", and is the only one who can modify the properties of the room such as who is allowed to join it.
+The user that creates the room is designated as the "Creator", and is the only one who can modify the properties of the room such as who is allowed to join it.
 
 If you try to create a room using a name that you already have a room for, a JSON 409 CONFLICT response will be returned.
 
@@ -160,13 +160,13 @@ Server response (one success, two failures):
 
 Join a room or leave it. You may only join rooms that you have permission to join.
 
-The response will contain a list of all peers currently in the room in the `args` attribute.
+The response will contain a list of all clients currently in the room in the `args` attribute.
 
-Immediately after joining a room, you must begin negotiation will all other peers in the room by sending them SDP offers and ICE candidates. They will reply with answers and ICE candidates of their own.
+Immediately after joining a room, you must begin negotiation will all other clients in the room by sending them SDP offers and ICE candidates. They will reply with answers and ICE candidates of their own.
 
-When a client joins a room, all other peers receive a Server → Client request [`room joined`](#room-joined--left-server), so they can expect to receive an SDP offer from you.
+When a client joins a room, all other clients receive a Server → Client request [`room joined`](#room-joined--left-server), so they can expect to receive an SDP offer from you.
 
-When a client leaves a room, all other peers receive a Server → Client request [`room left`](#room-joined--left-server), so they are expected to stop sending to this peer and stop receiving media from it.
+When a client leaves a room, all other clients receive a Server → Client request [`room left`](#room-joined--left-server), so they are expected to stop sending to this client and stop receiving media from it.
 
 Clients may join, leave, and rejoin a room at any point during a call.
 
@@ -194,8 +194,17 @@ Success response:
         "type": "response",
         "request_id": "3",
         "status_code": 200,
-        // Peers that are already in the room
-        "args": ["MahimaV", "ScottPilgrim"]
+        // Current members of the room
+        "args": [
+            {
+                "user_id": "MahimaV",
+                "client_id": "2e73ab52-b490-4cf0-a93a-6729645f13c4"
+            },
+            {
+                "user_id": "ScottPilgrim",
+                "client_id": "e0b3595c-822a-49e6-8620-fbc9b776d4e8"
+            }
+        ]
     }
 ]
 ```
@@ -215,11 +224,11 @@ Failure response:
 
 ### `room edit allow` | `disallow`
 
-Place a list of peers on the allow-list for a room, or remove them from the allow-list. Only the creator of the room is allowed to send this request.
+Place a list of users on the allow-list for a room, or remove them from the allow-list. Only the creator of the room is allowed to send this request.
 
 Peers do not have to be online to be added to (or removed from) the allow-list of a room.
 
-The **`disallow`** request ignores peer IDs that aren't already in the allow-list. You will receive a success response for such a request.
+The **`disallow`** request ignores user IDs that aren't already in the allow-list. You will receive a success response for such a request.
 
 If you **`disallow`** a user who is already in the room, the user will be kicked out as if they had sent a **`room leave`** request.
 
@@ -251,7 +260,7 @@ Success response:
 
 ### `room get allowed-users`
 
-Return a list of peers that are in the allow-list for the specified room.
+Return a list of users that are in the allow-list for the specified room.
 
 ```js
 [
@@ -281,7 +290,7 @@ Success response:
 
 ### `room set allowed-users`
 
-Instead of using a combination of `room edit allow` and `room edit disallow`, you can use `room set allowed-users` to set it directly. This will disallow all peers that aren't in the list, and allow all peers that are in the list.
+Instead of using a combination of `room edit allow` and `room edit disallow`, you can use `room set allowed-users` to set it directly. This will disallow all users that aren't in the list, and allow all users that are in the list.
 
 The same side-effects as `edit allow|disallow` apply.
 
@@ -317,11 +326,11 @@ Send a JSON message to a list of participants.
 
 Only current members of a room are allowed to send this request.
 
-The JSON message must be the third element in the `args` list for this request, and it can be ***any*** valid JSON value. The fourth element must be an array of peer IDs to send this message to.
+The JSON message must be the third element in the `args` list for this request, and it can be ***any*** valid JSON value. The fourth element must be an array of client IDs to send this message to.
 
-On receipt of this request, the server will send the specified message to all specified peers using the server → client _request_ [`room message`](#room-message-server).
+On receipt of this request, the server will send the specified message to all specified clients using the server → client _request_ [`room message`](#room-message-server).
 
-You are expected to use this to send SDP, ICE, or any other message to another peer, as part of the negotiation to start a call.
+You are expected to use this to send SDP, ICE, or any other message to another client, as part of the negotiation to start a call.
 
 ```js
 [
@@ -340,8 +349,8 @@ You are expected to use this to send SDP, ICE, or any other message to another p
                 }
             }, 
             [
-                "Lao88",
-                "Taiki97"
+                "3bbb38a8-ccd8-42d1-81a6-262776c98146", // client ID for user "Lao88"
+                "b4b26799-3851-478d-ac4d-5f56aed43d95" // client ID for user "Taiki97"
             ]
         ]
     }
@@ -401,7 +410,7 @@ You will receive a message like this:
         "type": "request",
         "request_id": "",
         "room_id": "dca2c32c-caa6-4ed6-8b86-1c0cd7339a4c",
-        "args": ["room", "joined", "Lao88"]
+        "args": ["room", "joined", "3bbb38a8-ccd8-42d1-81a6-262776c98146"] // client ID for user "Lao88"
     },
 ]
 ```
@@ -448,8 +457,8 @@ You will receive a message like this:
                     "sdp": "o=- ..."
                 }
             },
-            // The peer that sent the message
-            "Lao88"
+            // The client that sent the message
+            "3bbb38a8-ccd8-42d1-81a6-262776c98146" // client ID for user "Lao88"
         ]
     },
 ]

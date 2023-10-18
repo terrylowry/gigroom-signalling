@@ -16,32 +16,37 @@ use log::{debug, error, info, trace, warn};
 mod handler;
 use handler::Handler;
 
-type PeerID = String;
+type UserID = String;
+type ClientID = Uuid;
 #[derive(Debug)]
-pub struct Peer {
+pub struct Client {
     _conn_handle: task::JoinHandle<Result<(), Error>>,
     _cmdloop_handle: task::JoinHandle<Result<(), Error>>,
     tx: mpsc::Sender<String>,
 }
 
 #[derive(Debug)]
-pub struct Peers {
-    connected: HashMap<Uuid, Peer>,
-    identified: HashMap<PeerID, Peer>,
+pub struct Clients {
+    // Connected but not identified yet
+    connected: HashMap<ClientID, Client>,
+    // Connected and identified
+    identified: HashMap<ClientID, (UserID, Client)>,
+    // All connected clients identified as UserID, reverse mapping of the above for convenience
+    user_clients: HashMap<UserID, HashSet<ClientID>>,
 }
 
 type RoomID = Uuid;
 #[derive(Debug)]
 pub struct Room {
-    creator: PeerID,
+    creator: UserID,
     name: String,
-    allowed_members: HashSet<PeerID>,
-    current_members: HashSet<PeerID>,
+    allowed_users: HashSet<UserID>,
+    current_clients: HashSet<ClientID>,
 }
 
 #[derive(Clone, Debug)]
 pub struct State {
-    peers: Arc<Mutex<Peers>>,
+    clients: Arc<Mutex<Clients>>,
     rooms: Arc<Mutex<HashMap<RoomID, Room>>>,
 }
 
@@ -65,9 +70,10 @@ pub enum WsMessage {
 impl Server {
     pub fn new() -> Self {
         let state = State {
-            peers: Arc::new(Mutex::new(Peers {
+            clients: Arc::new(Mutex::new(Clients {
                 connected: HashMap::new(),
                 identified: HashMap::new(),
+                user_clients: HashMap::new(),
             })),
             rooms: Arc::new(Mutex::new(HashMap::new())),
         };
@@ -76,34 +82,39 @@ impl Server {
     }
 
     // TODO: This should do authentication using a token that is verified against the auth server.
-    async fn identify_peer<S: 'static>(
+    async fn identify_client<S: 'static>(
         msg: &str,
         state: &State,
-        temp_id: &Uuid,
+        client_id: Uuid,
         ws_sender: &mut SplitSink<WebSocketStream<S>, Message>,
-    ) -> Option<PeerID>
+    ) -> Option<UserID>
     where
         S: AsyncRead + AsyncWrite + Unpin + Send,
     {
         // If the peer does not successfully identify, we will drop the connection
-        let peer = { state.peers.lock().unwrap().connected.remove(temp_id) };
-        match peer {
-            Some(peer) => match msg.split_once(' ') {
+        let client = { state.clients.lock().unwrap().connected.remove(&client_id) };
+        match client {
+            Some(client) => match msg.split_once(' ') {
                 // XXX: Add peer version reporting here
                 Some(("IDENTIFY", got_peer_id)) => {
                     {
-                        let mut peers = state.peers.lock().unwrap();
-                        if peers.identified.contains_key(got_peer_id) {
-                            error!("Server already has a peer named {}", got_peer_id);
-                            // Drop connection
-                            // TODO: Once we add authorization, we should kick the previous user on
-                            // identify
-                            return None;
-                        }
-                        peers.identified.insert(got_peer_id.to_string(), peer);
+                        let mut clients = state.clients.lock().unwrap();
+                        clients
+                            .identified
+                            .insert(client_id, (got_peer_id.to_string(), client));
+                        match clients.user_clients.get_mut(got_peer_id) {
+                            Some(client_ids) => {
+                                client_ids.insert(client_id);
+                            }
+                            None => {
+                                clients
+                                    .user_clients
+                                    .insert(got_peer_id.to_string(), HashSet::from([client_id]));
+                            }
+                        };
                     }
                     ws_sender
-                        .send(Message::Text("IDENTIFIED".to_string()))
+                        .send(Message::Text(format!("IDENTIFIED {}", client_id)))
                         .await
                         .ok()?;
                     Some(got_peer_id.to_string())
@@ -114,28 +125,34 @@ impl Server {
                 }
             },
             None => {
-                error!("Invalid peer state {:?}, disconnecting", temp_id);
+                error!("Invalid client state {:?}, disconnecting", client_id);
                 None
             }
         }
     }
 
-    async fn remove_peer<S: 'static>(
+    async fn remove_client<S: 'static>(
         state: State,
         mut ws_sender: SplitSink<WebSocketStream<S>, Message>,
-        temp_id: Uuid,
-        peer_id: Option<String>,
+        client_id: Uuid,
     ) -> Result<(), Error>
     where
         S: AsyncRead + AsyncWrite + Unpin + Send,
     {
-        // XXX: Do we need to explicitly abort the JoinHandles?
-        if let Some(peer_id) = peer_id {
-            info!("Removing from identified peers list");
-            state.peers.lock().unwrap().identified.remove(&peer_id);
-        } else {
-            info!("Removing from connected peers list");
-            state.peers.lock().unwrap().connected.remove(&temp_id);
+        {
+            let mut clients = state.clients.lock().unwrap();
+            // XXX: Do we need to explicitly abort the JoinHandles?
+            info!("Removing from connected (but not identified) clients list");
+            clients.connected.remove(&client_id);
+            info!("Removing from identified clients list");
+            if let Some((user_id, _)) = clients.identified.remove(&client_id) {
+                if let Some(client_ids) = clients.user_clients.get_mut(&user_id) {
+                    client_ids.remove(&client_id);
+                    if client_ids.is_empty() {
+                        clients.user_clients.remove(&user_id);
+                    }
+                }
+            }
         }
 
         info!("Closing websocket client connection");
@@ -161,12 +178,12 @@ impl Server {
             }
         };
 
-        let temp_id = Uuid::new_v4();
-        let temp_id_clone = temp_id;
+        let client_id = Uuid::new_v4();
+        let client_id_clone = client_id;
 
         let (tx, tx_src) = mpsc::channel::<String>(1000);
         let (mut rx_sink, rx) = mpsc::channel::<String>(1000);
-        let (ident_sink, ident_src) = oneshot::channel::<String>();
+        let (ident_sink, ident_src) = oneshot::channel::<(Uuid, String)>();
         let _cmdloop_handle = task::spawn(Handler::cmd_loop(
             rx,
             tx.clone(),
@@ -176,21 +193,19 @@ impl Server {
 
         let state_clone = self.state.clone();
         let _conn_handle = task::spawn(async move {
-            let mut peer_id = None;
             let (mut ws_sender, ws_receiver) = ws_conn.split();
             let mut incoming = Box::pin(ws_receiver.map(|msg| msg.map(WsMessage::Incoming)));
             let identified = match incoming.next().await {
                 Some(Ok(WsMessage::Incoming(Message::Text(msg)))) => {
-                    let id =
-                        Self::identify_peer(&msg, &state_clone, &temp_id, &mut ws_sender).await;
-                    if let Some(id) = id {
-                        match ident_sink.send(id.clone()) {
+                    let user_id =
+                        Self::identify_client(&msg, &state_clone, client_id, &mut ws_sender).await;
+                    if let Some(user_id) = user_id {
+                        match ident_sink.send((client_id, user_id.clone())) {
                             Ok(()) => {}
                             Err(_) => {
                                 error!("Failed to complete ident: cmd_loop already dropped!");
                             }
                         }
-                        peer_id.replace(id);
                         true
                     } else {
                         false
@@ -202,7 +217,7 @@ impl Server {
                 }
             };
             if !identified {
-                return Self::remove_peer(state_clone, ws_sender, temp_id, peer_id).await;
+                return Self::remove_client(state_clone, ws_sender, client_id).await;
             }
 
             let outgoing = Box::pin(tx_src.map(|msg| Ok(WsMessage::Outgoing(msg))));
@@ -242,12 +257,12 @@ impl Server {
                 }
             }
 
-            Self::remove_peer(state_clone, ws_sender, temp_id, peer_id).await
+            Self::remove_client(state_clone, ws_sender, client_id).await
         });
 
-        self.state.peers.lock().unwrap().connected.insert(
-            temp_id_clone,
-            Peer {
+        self.state.clients.lock().unwrap().connected.insert(
+            client_id_clone,
+            Client {
                 _conn_handle,
                 _cmdloop_handle,
                 tx,
