@@ -574,13 +574,17 @@ impl Handler {
                     match rooms.get_mut(&room_id) {
                         Some(room) => {
                             if room.allowed_users.contains(user_id) {
-                                info!("Joining room {}", room_id);
-                                Ok(Self::room_add_client(
-                                    client_id,
-                                    &room_id,
-                                    room,
-                                    &server_state.clients,
-                                ))
+                                if room.current_clients.contains(client_id) {
+                                    Err((HttpCode::CONFLICT, "Already in the room"))
+                                } else {
+                                    info!("Joining room {}", room_id);
+                                    Ok(Self::room_add_client(
+                                        client_id,
+                                        &room_id,
+                                        room,
+                                        &server_state.clients,
+                                    ))
+                                }
                             } else {
                                 Err((HttpCode::FORBIDDEN, "Not allowed to join room"))
                             }
