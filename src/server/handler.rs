@@ -172,7 +172,7 @@ impl Handler {
     // Build a vector of requests that will be sent to the iterator of client IDs
     fn clients_request_builder<'a, I>(
         client_ids: I,
-        room_id: &Uuid,
+        room_id: Option<&Uuid>,
         args: &[Value],
         clients: &Arc<Mutex<Clients>>,
     ) -> RequestList
@@ -182,7 +182,7 @@ impl Handler {
         let mut reqs = Vec::new();
         let senders = Self::client_ids_to_senders(client_ids, clients);
         for sender in senders.into_iter() {
-            let msg = Self::make_request(Some(room_id), args).to_string();
+            let msg = Self::make_request(room_id, args).to_string();
             reqs.push((msg, sender));
         }
         reqs
@@ -224,7 +224,7 @@ impl Handler {
                 Self::clients_request_builder(
                     // Send the message to both current and allowed members
                     room.current_clients.iter().chain(allowed_connected.iter()),
-                    room_id,
+                    Some(room_id),
                     &[
                         Value::String("room".to_string()),
                         Value::String("destroyed".to_string()),
@@ -248,7 +248,7 @@ impl Handler {
         let (reqs, resp) = if !room.current_clients.is_empty() {
             let reqs = Self::clients_request_builder(
                 room.current_clients.iter(),
-                room_id,
+                Some(room_id),
                 &[
                     Value::String("room".to_string()),
                     Value::String("joined".to_string()),
@@ -291,7 +291,7 @@ impl Handler {
             if !room.current_clients.is_empty() {
                 Self::clients_request_builder(
                     room.current_clients.iter(),
-                    room_id,
+                    Some(room_id),
                     &[
                         Value::String("room".to_string()),
                         Value::String("left".to_string()),
@@ -318,7 +318,7 @@ impl Handler {
         // out of the room
         Self::clients_request_builder(
             room.current_clients.iter().filter(|id| *id == from_id),
-            room_id,
+            Some(room_id),
             &[
                 Value::String("room".to_string()),
                 Value::String("message".to_string()),
@@ -345,7 +345,7 @@ impl Handler {
         }
         Self::clients_request_builder(
             connected.iter(),
-            room_id,
+            Some(room_id),
             &[
                 Value::String("room".to_string()),
                 Value::String("active".to_string()),
@@ -484,14 +484,48 @@ impl Handler {
                             if room.creator == user_id {
                                 match args.next().and_then(|v| v.as_str()) {
                                     Some("allow") => {
-                                        for user_id in args.filter_map(|v| v.as_str()) {
-                                            // Trust that the creator knows that these PeerID
-                                            // values are valid
-                                            if !room.allowed_users.contains(user_id) {
+                                        let mut client_ids = Vec::new();
+                                        {
+                                            let clients = server_state.clients.lock().unwrap();
+                                            for user_id in args.filter_map(|v| v.as_str()) {
+                                                // Trust that the creator knows that these PeerID
+                                                // values are valid
+                                                if room.allowed_users.contains(user_id) {
+                                                    continue;
+                                                }
                                                 room.allowed_users.insert(user_id.to_string());
+                                                if let Some(v) = clients.user_clients.get(user_id) {
+                                                    client_ids.extend(v)
+                                                }
                                             }
                                         }
-                                        Ok(None)
+                                        let mut room_details = serde_json::Map::new();
+                                        room_details.insert(
+                                            "room_id".to_string(),
+                                            Value::String(room_id.to_string()),
+                                        );
+                                        room_details.insert(
+                                            "room_name".to_string(),
+                                            Value::String(room.name.to_string()),
+                                        );
+                                        room_details.insert(
+                                            "creator".to_string(),
+                                            Value::String(room.creator.clone()),
+                                        );
+                                        room_details.insert(
+                                            "active".to_string(),
+                                            Value::Bool(!room.current_clients.is_empty()),
+                                        );
+                                        Ok(Some(Self::clients_request_builder(
+                                            client_ids.iter(),
+                                            None,
+                                            &[
+                                                Value::String("room".to_string()),
+                                                Value::String("created".to_string()),
+                                                Value::Object(room_details),
+                                            ],
+                                            &server_state.clients,
+                                        )))
                                     }
                                     Some("disallow") => {
                                         let mut requests = Vec::new();

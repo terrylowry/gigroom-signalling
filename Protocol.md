@@ -377,6 +377,35 @@ In some cases, the server will send _requests_ to the client instead of the usua
 
 A response from the client is **not** expected for any requests at the moment.
 
+### `room created` (server)
+
+A room that you are allowed to join has been created. This serves as an update notification for the list you received in `room list`.
+
+In practice, you will get this message when you are added to the allow-list for a room, since a newly-created room has no one in its allow-list.
+
+You will receive a message like this:
+
+```js
+[
+    {
+        "type": "request",
+        "request_id": "",
+        "args": [
+            "room",
+            "created",
+            {
+                "room_id": "dca2c32c-caa6-4ed6-8b86-1c0cd7339a4c",
+                "room_name": "Violin Ensemble",
+                "creator": "tlowry",
+                // This will be `true` if you're added to the allow-list
+                // of a room with an active call
+                "active": false
+            }
+        ]
+    },
+]
+```
+
 ### `room active` (server) (connected only)
 
 The specified room has become active because someone joined it for the first time, meaning that a call has begun. You will not receive this message if you are already in the room, because the room is implied to be active already if someone is in it.
@@ -419,8 +448,8 @@ You will receive a message like this:
 
 This means the group call has ended. You will receive this message in two cases:
 
-* The room has been destroyed by the Creator while you were in it or you were in the allowed list
-* The room was destroyed because everyone left the room (which automatically destroys it) while you were in the allowed list but *not* in the room itself (since there is no one remaining in the room to receive a `destroyed` in that case)
+* The room has been destroyed by the Creator while you were in it or you were in the allowed list. This serves as an update notification for the list you received in `room list`.
+* The room was destroyed because everyone left the room (which automatically destroys it) while you were in the allowed list but *not* in the room itself (since there is no one remaining in the room to receive a `destroyed` in that case).
 
 You will receive a message like this:
 
