@@ -453,7 +453,6 @@ impl Handler {
                     let mut rooms = server_state.rooms.lock().unwrap();
                     match rooms.get_mut(&room_id) {
                         Some(room) => {
-                            let creator = room.creator.clone();
                             if room.creator == peer_id {
                                 match args.next().and_then(|v| v.as_str()) {
                                     Some("allow") => {
@@ -466,19 +465,21 @@ impl Handler {
                                         }
                                         Ok(None)
                                     }
-                                    Some("disallow") => Ok(Some(
-                                        args.filter_map(|arg| arg.as_str())
-                                            .filter(|member| *member != creator)
-                                            .flat_map(|member| {
-                                                Self::room_remove_member(
+                                    Some("disallow") => {
+                                        let mut responses = Vec::new();
+                                        let creator = room.creator.clone();
+                                        for member in args.filter_map(|v| v.as_str()) {
+                                            if member != creator {
+                                                responses.extend(Self::room_remove_member(
                                                     member,
                                                     &room_id,
                                                     &mut rooms,
                                                     &server_state.peers,
-                                                )
-                                            })
-                                            .collect::<RequestList>(),
-                                    )),
+                                                ))
+                                            }
+                                        }
+                                        Ok(Some(responses))
+                                    },
                                     _ => Err((HttpCode::BAD_REQUEST, "Unknown room edit argument")),
                                 }
                             } else {
