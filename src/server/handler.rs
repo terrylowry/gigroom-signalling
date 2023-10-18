@@ -268,7 +268,6 @@ impl Handler {
         peers: &Arc<Mutex<Peers>>,
     ) -> RequestList {
         let room = rooms.get_mut(room_id).unwrap();
-        room.allowed_members.remove(member);
         if room.current_members.remove(member) {
             if room.current_members.is_empty() {
                 Self::room_destroy(room_id, rooms, peers)
