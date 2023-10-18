@@ -453,6 +453,7 @@ impl Handler {
                     let mut rooms = server_state.rooms.lock().unwrap();
                     match rooms.get_mut(&room_id) {
                         Some(room) => {
+                            let creator = room.creator.clone();
                             if room.creator == peer_id {
                                 match args.next().and_then(|v| v.as_str()) {
                                     Some("allow") => {
@@ -467,9 +468,10 @@ impl Handler {
                                     }
                                     Some("disallow") => Ok(Some(
                                         args.filter_map(|arg| arg.as_str())
-                                            .flat_map(|arg| {
+                                            .filter(|member| *member != creator)
+                                            .flat_map(|member| {
                                                 Self::room_remove_member(
-                                                    arg,
+                                                    member,
                                                     &room_id,
                                                     &mut rooms,
                                                     &server_state.peers,
