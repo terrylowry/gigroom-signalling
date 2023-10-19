@@ -217,8 +217,12 @@ impl Handler {
                 {
                     let user_clients = &clients.lock().unwrap().user_clients;
                     for user_id in room.allowed_users.iter() {
-                        if let Some(client_id) = user_clients.get(user_id) {
-                            allowed_connected.extend(client_id);
+                        if let Some(client_ids) = user_clients.get(user_id) {
+                            for client_id in client_ids {
+                                if !room.current_clients.contains(client_id) {
+                                    allowed_connected.push(*client_id);
+                                }
+                            }
                         }
                     }
                 }
