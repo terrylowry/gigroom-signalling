@@ -68,6 +68,7 @@ impl Handler {
                 let room = rooms.get_mut(room_id).unwrap();
                 requests.extend(Self::room_remove_client(
                     &client_id,
+                    &user_id,
                     room_id,
                     room,
                     &server_state.clients,
@@ -241,6 +242,7 @@ impl Handler {
 
     fn room_add_client(
         client_id: &Uuid,
+        user_id: &str,
         room_id: &Uuid,
         room: &mut Room,
         clients: &Arc<Mutex<Clients>>,
@@ -253,6 +255,7 @@ impl Handler {
                     Value::String("room".to_string()),
                     Value::String("joined".to_string()),
                     Value::String(client_id.to_string()),
+                    Value::String(user_id.to_string()),
                 ],
                 clients,
             );
@@ -283,6 +286,7 @@ impl Handler {
 
     fn room_remove_client(
         client_id: &Uuid,
+        user_id: &str,
         room_id: &Uuid,
         room: &mut Room,
         clients: &Arc<Mutex<Clients>>,
@@ -296,6 +300,7 @@ impl Handler {
                         Value::String("room".to_string()),
                         Value::String("left".to_string()),
                         Value::String(client_id.to_string()),
+                        Value::String(user_id.to_string()),
                     ],
                     clients,
                 )
@@ -534,6 +539,7 @@ impl Handler {
                                                 room.allowed_users.remove(user_id);
                                                 requests.extend(Self::room_remove_client(
                                                     client_id,
+                                                    user_id,
                                                     &room_id,
                                                     room,
                                                     &server_state.clients,
@@ -614,6 +620,7 @@ impl Handler {
                                     info!("Joining room {}", room_id);
                                     Ok(Self::room_add_client(
                                         client_id,
+                                        user_id,
                                         &room_id,
                                         room,
                                         &server_state.clients,
@@ -647,6 +654,7 @@ impl Handler {
                         } else {
                             Ok(Self::room_remove_client(
                                 client_id,
+                                user_id,
                                 &room_id,
                                 room,
                                 &server_state.clients,

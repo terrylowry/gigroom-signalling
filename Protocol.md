@@ -439,7 +439,7 @@ You will receive a message like this:
         "type": "request",
         "request_id": "",
         "room_id": "dca2c32c-caa6-4ed6-8b86-1c0cd7339a4c",
-        "args": ["room", "joined", "3bbb38a8-ccd8-42d1-81a6-262776c98146"] // client ID for user "Lao88"
+        "args": ["room", "joined", "3bbb38a8-ccd8-42d1-81a6-262776c98146", "Lao88"] // client ID and user ID
     },
 ]
 ```
