@@ -213,22 +213,18 @@ impl Handler {
     ) -> RequestList {
         match rooms.remove(room_id) {
             Some(room) => {
-                let mut allowed_connected = Vec::new();
+                let mut allowed_clients = Vec::new();
                 {
                     let user_clients = &clients.lock().unwrap().user_clients;
                     for user_id in room.allowed_users.iter() {
                         if let Some(client_ids) = user_clients.get(user_id) {
-                            for client_id in client_ids {
-                                if !room.current_clients.contains(client_id) {
-                                    allowed_connected.push(*client_id);
-                                }
-                            }
+                            allowed_clients.extend(client_ids);
                         }
                     }
                 }
                 Self::clients_request_builder(
-                    // Send the message to both current and allowed members
-                    room.current_clients.iter().chain(allowed_connected.iter()),
+                    // Send the message to all allowed members, whether room members or not
+                    allowed_clients.iter(),
                     Some(room_id),
                     &[
                         Value::String("room".to_string()),
