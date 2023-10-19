@@ -656,13 +656,17 @@ impl Handler {
                         if !room.current_clients.contains(client_id) {
                             Err((HttpCode::BAD_REQUEST, "Not a member of room"))
                         } else {
-                            Ok(Self::room_remove_client(
+                            let reqs = Self::room_remove_client(
                                 client_id,
                                 user_id,
                                 &room_id,
                                 room,
                                 &server_state.clients,
-                            ))
+                            );
+                            if room.current_clients.is_empty() {
+                                Self::room_destroy(&room_id, &mut rooms, &server_state.clients);
+                            }
+                            Ok(reqs)
                         }
                     }
                 };
