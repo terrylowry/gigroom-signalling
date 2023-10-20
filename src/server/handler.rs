@@ -276,8 +276,19 @@ impl Handler {
         } else {
             // There were no members in the room, which means the room went from inactive to active
             // and we need to notify allowed members
-            let reqs = Self::allowed_members_craft_active_messages(room_id, room, clients);
-            (reqs, vec![])
+            (
+                Self::allowed_members_craft_messages(
+                    room_id,
+                    room,
+                    &[
+                        Value::String("room".to_string()),
+                        Value::String("active".to_string()),
+                    ],
+                    client_id,
+                    clients,
+                ),
+                Vec::new(),
+            )
         };
         // Add peer to the room
         room.current_clients.insert(*client_id);
@@ -312,31 +323,11 @@ impl Handler {
         }
     }
 
-    fn room_craft_messages(
-        from_id: &Uuid,
+    fn allowed_members_craft_messages(
         room_id: &Uuid,
         room: &Room,
-        msg: &Value,
-        clients: &Arc<Mutex<Clients>>,
-    ) -> RequestList {
-        // Collect a list of room members that need to be notified that this peer has been kicked
-        // out of the room
-        Self::clients_request_builder(
-            room.current_clients.iter().filter(|id| *id == from_id),
-            Some(room_id),
-            &[
-                Value::String("room".to_string()),
-                Value::String("message".to_string()),
-                msg.clone(),
-                Value::String(from_id.to_string()),
-            ],
-            clients,
-        )
-    }
-
-    fn allowed_members_craft_active_messages(
-        room_id: &Uuid,
-        room: &Room,
+        args: &[Value],
+        from_client_id: &Uuid,
         clients: &Arc<Mutex<Clients>>,
     ) -> RequestList {
         let mut connected: Vec<Uuid> = Vec::new();
@@ -344,17 +335,39 @@ impl Handler {
             let clients = clients.lock().unwrap();
             for user in room.allowed_users.iter() {
                 if let Some(c) = clients.user_clients.get(user) {
-                    connected.extend(c.iter())
+                    connected.extend(c.iter().filter(|&id| id == from_client_id))
                 }
             }
         }
-        Self::clients_request_builder(
-            connected.iter(),
-            Some(room_id),
+        Self::clients_request_builder(connected.iter(), Some(room_id), args, clients)
+    }
+
+    fn allowed_members_craft_created_messages(
+        room_id: &Uuid,
+        room: &Room,
+        from_client_id: &Uuid,
+        clients: &Arc<Mutex<Clients>>,
+    ) -> RequestList {
+        let mut room_details = serde_json::Map::new();
+        room_details.insert("room_id".to_string(), Value::String(room_id.to_string()));
+        room_details.insert(
+            "room_name".to_string(),
+            Value::String(room.name.to_string()),
+        );
+        room_details.insert("creator".to_string(), Value::String(room.creator.clone()));
+        room_details.insert(
+            "active".to_string(),
+            Value::Bool(!room.current_clients.is_empty()),
+        );
+        Self::allowed_members_craft_messages(
+            room_id,
+            room,
             &[
                 Value::String("room".to_string()),
-                Value::String("active".to_string()),
+                Value::String("created".to_string()),
+                Value::Object(room_details),
             ],
+            from_client_id,
             clients,
         )
     }
@@ -427,32 +440,46 @@ impl Handler {
         let response_args = match arg1 {
             Some("create") => {
                 debug!("{}", format!("{server_state:#?}"));
-                let mut rooms = server_state.rooms.lock().unwrap();
-                if rooms.contains_key(&room_id) {
-                    Err((HttpCode::CONFLICT, "Room ID already in use"))
-                } else {
-                    debug!("{}", format!("{rooms:#?}"));
-                    if let Some(name) = args.next().and_then(|v| v.as_str()) {
-                        if rooms
-                            .values()
-                            .any(|room| room.creator == user_id && room.name == name)
-                        {
-                            Err((HttpCode::CONFLICT, "Room already exists"))
-                        } else {
-                            rooms.insert(
-                                room_id,
-                                Room {
+                let requests = {
+                    let mut rooms = server_state.rooms.lock().unwrap();
+                    if rooms.contains_key(&room_id) {
+                        Err((HttpCode::CONFLICT, "Room ID already in use"))
+                    } else {
+                        debug!("{}", format!("{rooms:#?}"));
+                        if let Some(name) = args.next().and_then(|v| v.as_str()) {
+                            if rooms
+                                .values()
+                                .any(|room| room.creator == user_id && room.name == name)
+                            {
+                                Err((HttpCode::CONFLICT, "Room already exists"))
+                            } else {
+                                let room = Room {
                                     creator: user_id.to_string(),
                                     name: name.to_string(),
                                     allowed_users: HashSet::from([user_id.to_string()]),
                                     current_clients: HashSet::new(),
-                                },
-                            );
-                            Ok(None)
+                                };
+                                let reqs = Self::allowed_members_craft_created_messages(
+                                    &room_id,
+                                    &room,
+                                    client_id,
+                                    &server_state.clients,
+                                );
+                                rooms.insert(room_id, room);
+                                Ok(Some(reqs))
+                            }
+                        } else {
+                            Err((HttpCode::BAD_REQUEST, "Room name missing"))
                         }
-                    } else {
-                        Err((HttpCode::BAD_REQUEST, "Room name missing"))
                     }
+                };
+                match requests {
+                    Ok(Some(reqs)) => {
+                        Self::send_requests(reqs).await;
+                        Ok(None)
+                    }
+                    Ok(None) => Ok(None),
+                    Err(e) => Err(e),
                 }
             }
             Some("destroy") => {
@@ -489,46 +516,18 @@ impl Handler {
                             if room.creator == user_id {
                                 match args.next().and_then(|v| v.as_str()) {
                                     Some("allow") => {
-                                        let mut client_ids = Vec::new();
-                                        {
-                                            let clients = server_state.clients.lock().unwrap();
-                                            for user_id in args.filter_map(|v| v.as_str()) {
-                                                // Trust that the creator knows that these PeerID
-                                                // values are valid
-                                                if room.allowed_users.contains(user_id) {
-                                                    continue;
-                                                }
-                                                room.allowed_users.insert(user_id.to_string());
-                                                if let Some(v) = clients.user_clients.get(user_id) {
-                                                    client_ids.extend(v)
-                                                }
+                                        for user_id in args.filter_map(|v| v.as_str()) {
+                                            if room.allowed_users.contains(user_id) {
+                                                continue;
                                             }
+                                            // Blindly trust that the creator knows that these
+                                            // UserID values are (or will be) valid
+                                            room.allowed_users.insert(user_id.to_string());
                                         }
-                                        let mut room_details = serde_json::Map::new();
-                                        room_details.insert(
-                                            "room_id".to_string(),
-                                            Value::String(room_id.to_string()),
-                                        );
-                                        room_details.insert(
-                                            "room_name".to_string(),
-                                            Value::String(room.name.to_string()),
-                                        );
-                                        room_details.insert(
-                                            "creator".to_string(),
-                                            Value::String(room.creator.clone()),
-                                        );
-                                        room_details.insert(
-                                            "active".to_string(),
-                                            Value::Bool(!room.current_clients.is_empty()),
-                                        );
-                                        Ok(Some(Self::clients_request_builder(
-                                            client_ids.iter(),
-                                            None,
-                                            &[
-                                                Value::String("room".to_string()),
-                                                Value::String("created".to_string()),
-                                                Value::Object(room_details),
-                                            ],
+                                        Ok(Some(Self::allowed_members_craft_created_messages(
+                                            &room_id,
+                                            room,
+                                            client_id,
                                             &server_state.clients,
                                         )))
                                     }
@@ -689,11 +688,17 @@ impl Handler {
                         match rooms.get_mut(&room_id) {
                             Some(room) => {
                                 if room.current_clients.contains(client_id) {
-                                    Ok(Some(Self::room_craft_messages(
-                                        client_id,
-                                        &room_id,
-                                        room,
-                                        msg,
+                                    // Collect a list of room members that need to be notified that
+                                    // this peer has been kicked out of the room
+                                    Ok(Some(Self::clients_request_builder(
+                                        room.current_clients.iter().filter(|id| *id == client_id),
+                                        Some(&room_id),
+                                        &[
+                                            Value::String("room".to_string()),
+                                            Value::String("message".to_string()),
+                                            msg.clone(),
+                                            Value::String(client_id.to_string()),
+                                        ],
                                         &server_state.clients,
                                     )))
                                 } else {

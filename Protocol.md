@@ -390,10 +390,12 @@ You will receive a message like this:
     {
         "type": "request",
         "request_id": "",
+        "room_id": "dca2c32c-caa6-4ed6-8b86-1c0cd7339a4c",
         "args": [
             "room",
             "created",
             {
+                // Duplicated for convenience
                 "room_id": "dca2c32c-caa6-4ed6-8b86-1c0cd7339a4c",
                 "room_name": "Violin Ensemble",
                 "creator": "tlowry",
