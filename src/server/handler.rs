@@ -213,19 +213,9 @@ impl Handler {
     ) -> RequestList {
         match rooms.remove(room_id) {
             Some(room) => {
-                let mut allowed_clients = Vec::new();
-                {
-                    let user_clients = &clients.lock().unwrap().user_clients;
-                    for user_id in room.allowed_users.iter() {
-                        if let Some(client_ids) = user_clients.get(user_id) {
-                            allowed_clients.extend(client_ids);
-                        }
-                    }
-                }
-                Self::clients_request_builder(
-                    // Send the message to all allowed members, whether room members or not
-                    allowed_clients.iter(),
-                    Some(room_id),
+                Self::allowed_members_craft_messages(
+                    room_id,
+                    &room,
                     &[
                         Value::String("room".to_string()),
                         Value::String("destroyed".to_string()),
@@ -284,7 +274,6 @@ impl Handler {
                         Value::String("room".to_string()),
                         Value::String("active".to_string()),
                     ],
-                    client_id,
                     clients,
                 ),
                 Vec::new(),
@@ -327,7 +316,6 @@ impl Handler {
         room_id: &Uuid,
         room: &Room,
         args: &[Value],
-        from_client_id: &Uuid,
         clients: &Arc<Mutex<Clients>>,
     ) -> RequestList {
         let mut connected: Vec<Uuid> = Vec::new();
@@ -335,7 +323,7 @@ impl Handler {
             let clients = clients.lock().unwrap();
             for user in room.allowed_users.iter() {
                 if let Some(c) = clients.user_clients.get(user) {
-                    connected.extend(c.iter().filter(|&id| id == from_client_id))
+                    connected.extend(c)
                 }
             }
         }
@@ -345,7 +333,6 @@ impl Handler {
     fn allowed_members_craft_created_messages(
         room_id: &Uuid,
         room: &Room,
-        from_client_id: &Uuid,
         clients: &Arc<Mutex<Clients>>,
     ) -> RequestList {
         let mut room_details = serde_json::Map::new();
@@ -367,7 +354,6 @@ impl Handler {
                 Value::String("created".to_string()),
                 Value::Object(room_details),
             ],
-            from_client_id,
             clients,
         )
     }
@@ -462,7 +448,6 @@ impl Handler {
                                 let reqs = Self::allowed_members_craft_created_messages(
                                     &room_id,
                                     &room,
-                                    client_id,
                                     &server_state.clients,
                                 );
                                 rooms.insert(room_id, room);
@@ -527,7 +512,6 @@ impl Handler {
                                         Ok(Some(Self::allowed_members_craft_created_messages(
                                             &room_id,
                                             room,
-                                            client_id,
                                             &server_state.clients,
                                         )))
                                     }

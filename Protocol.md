@@ -377,7 +377,7 @@ In some cases, the server will send _requests_ to the client instead of the usua
 
 A response from the client is **not** expected for any requests at the moment.
 
-### `room created` (server)
+### `room created` (server) (🖅 allowed)
 
 A room that you are allowed to join has been created. This serves as an update notification for the list you received in `room list`.
 
@@ -408,7 +408,7 @@ You will receive a message like this:
 ]
 ```
 
-### `room active` (server) (connected only)
+### `room active` (server) (🖅 allowed)
 
 The specified room has become active because someone joined it for the first time, meaning that a call has begun. You will not receive this message if you are already in the room, because the room is implied to be active already if someone is in it.
 
@@ -429,7 +429,7 @@ You will receive a message like this:
 ]
 ```
 
-### `room joined` | `left` (server) (members only)
+### `room joined` | `left` (server) (🖅 members)
 
 The specified client has joined or left the specified room that you are a member of. You will not receive these messages if you are not in the room.
 
@@ -446,7 +446,7 @@ You will receive a message like this:
 ]
 ```
 
-### `room destroyed` (server) (members and connected)
+### `room destroyed` (server) (🖅 allowed)
 
 This means the group call has ended. You will receive this message in two cases:
 
@@ -466,7 +466,7 @@ You will receive a message like this:
 ]
 ```
 
-### `room message` (server) (members only)
+### `room message` (server) (🖅 members)
 
 A member of the room has sent you a JSON message, usually for negotiation (SDP or ICE). You can reply to it with your own [`room message`](#room-message) request.
 
