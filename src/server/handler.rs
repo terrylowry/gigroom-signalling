@@ -212,17 +212,15 @@ impl Handler {
         clients: &Arc<Mutex<Clients>>,
     ) -> RequestList {
         match rooms.remove(room_id) {
-            Some(room) => {
-                Self::allowed_members_craft_messages(
-                    room_id,
-                    &room,
-                    &[
-                        Value::String("room".to_string()),
-                        Value::String("destroyed".to_string()),
-                    ],
-                    clients,
-                )
-            }
+            Some(room) => Self::allowed_members_craft_messages(
+                room_id,
+                &room,
+                &[
+                    Value::String("room".to_string()),
+                    Value::String("destroyed".to_string()),
+                ],
+                clients,
+            ),
             None => {
                 debug!("Room already destroyed");
                 vec![]
