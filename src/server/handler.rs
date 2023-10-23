@@ -312,6 +312,44 @@ impl Handler {
         }
     }
 
+    fn room_remove_user(
+        user_id: &str,
+        room_id: &Uuid,
+        room: &mut Room,
+        clients: &Arc<Mutex<Clients>>,
+    ) -> RequestList {
+        let removed_clients = {
+            let client_list = clients.lock().unwrap();
+            if let Some(client_ids) = client_list.user_clients.get(user_id) {
+                client_ids
+                    .iter()
+                    .filter(|client_id| room.current_clients.remove(client_id))
+                    .map(|client_id| (user_id, *client_id))
+                    .collect()
+            } else {
+                Vec::new()
+            }
+        };
+
+        let mut reqs: RequestList = RequestList::new();
+        if !room.current_clients.is_empty() {
+            for (user_id, client_id) in removed_clients.iter() {
+                reqs.extend(Self::clients_request_builder(
+                    room.current_clients.iter(),
+                    Some(room_id),
+                    &[
+                        Value::String("room".to_string()),
+                        Value::String("left".to_string()),
+                        Value::String(client_id.to_string()),
+                        Value::String(user_id.to_string()),
+                    ],
+                    clients,
+                ))
+            }
+        }
+        reqs
+    }
+
     fn users_craft_messages<'a, I>(
         users: I,
         room_id: &Uuid,
@@ -529,8 +567,7 @@ impl Handler {
                                         for user_id in args.filter_map(|v| v.as_str()) {
                                             if user_id != room.creator {
                                                 room.allowed_users.remove(user_id);
-                                                requests.extend(Self::room_remove_client(
-                                                    client_id,
+                                                requests.extend(Self::room_remove_user(
                                                     user_id,
                                                     &room_id,
                                                     room,
@@ -588,12 +625,15 @@ impl Handler {
                             Some(room) => {
                                 if room.creator == user_id {
                                     let mut reqs = Vec::new();
-                                    let old_allowed: HashSet<String> = HashSet::from_iter(
-                                        room.allowed_users.iter().map(|s| s.clone()),
-                                    );
+                                    let old_allowed: HashSet<String> =
+                                        HashSet::from_iter(room.allowed_users.iter().cloned());
                                     let mut allowed: HashSet<String> = HashSet::from_iter(
                                         args.filter_map(|v| v.as_str()).map(|s| s.to_string()),
                                     );
+                                    allowed.insert(room.creator.clone());
+
+                                    let had_clients = !room.current_clients.is_empty();
+
                                     // Construct "room created" messages; must not be sent to the
                                     // creator's clients
                                     reqs.extend(Self::users_craft_created_messages(
@@ -602,22 +642,44 @@ impl Handler {
                                         room,
                                         &server_state.clients,
                                     ));
-                                    // Construct "room left" messages
-                                    allowed.insert(room.creator.clone());
-                                    for uid in old_allowed.iter() {
-                                        if allowed.contains(uid) {
-                                            continue;
-                                        }
-                                        reqs.extend(Self::room_remove_client(
-                                            client_id,
+
+                                    // Construct "room left" and "room destroyed" messages for
+                                    // removed users
+                                    let removed_users: Vec<_> = old_allowed
+                                        .iter()
+                                        .filter(|&uid| !allowed.contains(uid))
+                                        .collect();
+
+                                    for uid in removed_users.iter() {
+                                        reqs.extend(Self::room_remove_user(
                                             uid,
                                             &room_id,
                                             room,
                                             &server_state.clients,
                                         ))
                                     }
-                                    room.allowed_users.retain(|v| *v == room.creator);
-                                    room.allowed_users.extend(allowed);
+
+                                    reqs.extend(Self::users_craft_messages(
+                                        removed_users.into_iter(),
+                                        &room_id,
+                                        &[
+                                            Value::String("room".to_string()),
+                                            Value::String("destroyed".to_string()),
+                                        ],
+                                        &server_state.clients,
+                                    ));
+
+                                    room.allowed_users = allowed;
+
+                                    // If this removed all the room's users destroy the room
+                                    if had_clients && room.current_clients.is_empty() {
+                                        reqs.extend(Self::room_destroy(
+                                            &room_id,
+                                            &mut rooms,
+                                            &server_state.clients,
+                                        ));
+                                    }
+
                                     Ok(Some(reqs))
                                 } else {
                                     Err((HttpCode::FORBIDDEN, "room set not allowed"))
