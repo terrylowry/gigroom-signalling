@@ -255,10 +255,7 @@ impl Handler {
                 if let Some((user_id, _)) = clients.identified.get(id) {
                     let mut o = serde_json::Map::new();
                     o.insert("user_id".to_string(), Value::String(user_id.clone()));
-                    o.insert(
-                        "client_id".to_string(),
-                        Value::String(client_id.to_string()),
-                    );
+                    o.insert("client_id".to_string(), Value::String(id.to_string()));
                     other_members.push(Value::Object(o));
                 }
             }
