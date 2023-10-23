@@ -675,7 +675,7 @@ impl Handler {
                                     // Collect a list of room members that need to be notified that
                                     // this peer has been kicked out of the room
                                     Ok(Some(Self::clients_request_builder(
-                                        room.current_clients.iter().filter(|id| *id == client_id),
+                                        room.current_clients.iter().filter(|id| *id != client_id),
                                         Some(&room_id),
                                         &[
                                             Value::String("room".to_string()),
