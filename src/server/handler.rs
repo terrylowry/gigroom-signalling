@@ -212,9 +212,9 @@ impl Handler {
         clients: &Arc<Mutex<Clients>>,
     ) -> RequestList {
         match rooms.remove(room_id) {
-            Some(room) => Self::allowed_members_craft_messages(
+            Some(room) => Self::users_craft_messages(
+                room.allowed_users.iter(),
                 room_id,
-                &room,
                 &[
                     Value::String("room".to_string()),
                     Value::String("destroyed".to_string()),
@@ -267,9 +267,9 @@ impl Handler {
             // There were no members in the room, which means the room went from inactive to active
             // and we need to notify allowed members
             (
-                Self::allowed_members_craft_messages(
+                Self::users_craft_messages(
+                    room.allowed_users.iter(),
                     room_id,
-                    room,
                     &[
                         Value::String("room".to_string()),
                         Value::String("active".to_string()),
@@ -312,16 +312,19 @@ impl Handler {
         }
     }
 
-    fn allowed_members_craft_messages(
+    fn users_craft_messages<'a, I>(
+        users: I,
         room_id: &Uuid,
-        room: &Room,
         args: &[Value],
         clients: &Arc<Mutex<Clients>>,
-    ) -> RequestList {
+    ) -> RequestList
+    where
+        I: Iterator<Item = &'a String>,
+    {
         let mut connected: Vec<Uuid> = Vec::new();
         {
             let clients = clients.lock().unwrap();
-            for user in room.allowed_users.iter() {
+            for user in users {
                 if let Some(c) = clients.user_clients.get(user) {
                     connected.extend(c)
                 }
@@ -330,11 +333,15 @@ impl Handler {
         Self::clients_request_builder(connected.iter(), Some(room_id), args, clients)
     }
 
-    fn allowed_members_craft_created_messages(
+    fn users_craft_created_messages<'a, I>(
+        users: I,
         room_id: &Uuid,
         room: &Room,
         clients: &Arc<Mutex<Clients>>,
-    ) -> RequestList {
+    ) -> RequestList
+    where
+        I: Iterator<Item = &'a String>,
+    {
         let mut room_details = serde_json::Map::new();
         room_details.insert("room_id".to_string(), Value::String(room_id.to_string()));
         room_details.insert(
@@ -346,9 +353,9 @@ impl Handler {
             "active".to_string(),
             Value::Bool(!room.current_clients.is_empty()),
         );
-        Self::allowed_members_craft_messages(
+        Self::users_craft_messages(
+            users,
             room_id,
-            room,
             &[
                 Value::String("room".to_string()),
                 Value::String("created".to_string()),
@@ -445,7 +452,8 @@ impl Handler {
                                     allowed_users: HashSet::from([user_id.to_string()]),
                                     current_clients: HashSet::new(),
                                 };
-                                let reqs = Self::allowed_members_craft_created_messages(
+                                let reqs = Self::users_craft_created_messages(
+                                    [&room.creator].into_iter(),
                                     &room_id,
                                     &room,
                                     &server_state.clients,
@@ -509,7 +517,8 @@ impl Handler {
                                             // UserID values are (or will be) valid
                                             room.allowed_users.insert(user_id.to_string());
                                         }
-                                        Ok(Some(Self::allowed_members_craft_created_messages(
+                                        Ok(Some(Self::users_craft_created_messages(
+                                            room.allowed_users.iter(),
                                             &room_id,
                                             room,
                                             &server_state.clients,
@@ -573,19 +582,57 @@ impl Handler {
             },
             Some("set") => match args.next().and_then(|v| v.as_str()) {
                 Some("allowed-users") => {
-                    let mut rooms = server_state.rooms.lock().unwrap();
-                    match rooms.get_mut(&room_id) {
-                        Some(room) => {
-                            if room.creator == user_id {
-                                room.allowed_users.retain(|v| *v == room.creator);
-                                room.allowed_users
-                                    .extend(args.filter_map(|v| v.as_str()).map(|s| s.to_string()));
-                                Ok(None)
-                            } else {
-                                Err((HttpCode::FORBIDDEN, "room set not allowed"))
+                    let requests = {
+                        let mut rooms = server_state.rooms.lock().unwrap();
+                        match rooms.get_mut(&room_id) {
+                            Some(room) => {
+                                if room.creator == user_id {
+                                    let mut reqs = Vec::new();
+                                    let old_allowed: HashSet<String> = HashSet::from_iter(
+                                        room.allowed_users.iter().map(|s| s.clone()),
+                                    );
+                                    let mut allowed: HashSet<String> = HashSet::from_iter(
+                                        args.filter_map(|v| v.as_str()).map(|s| s.to_string()),
+                                    );
+                                    // Construct "room created" messages; must not be sent to the
+                                    // creator's clients
+                                    reqs.extend(Self::users_craft_created_messages(
+                                        allowed.iter().filter(|&uid| !old_allowed.contains(uid)),
+                                        &room_id,
+                                        room,
+                                        &server_state.clients,
+                                    ));
+                                    // Construct "room left" messages
+                                    allowed.insert(room.creator.clone());
+                                    for uid in old_allowed.iter() {
+                                        if allowed.contains(uid) {
+                                            continue;
+                                        }
+                                        reqs.extend(Self::room_remove_client(
+                                            client_id,
+                                            uid,
+                                            &room_id,
+                                            room,
+                                            &server_state.clients,
+                                        ))
+                                    }
+                                    room.allowed_users.retain(|v| *v == room.creator);
+                                    room.allowed_users.extend(allowed);
+                                    Ok(Some(reqs))
+                                } else {
+                                    Err((HttpCode::FORBIDDEN, "room set not allowed"))
+                                }
                             }
+                            None => Err((HttpCode::NOT_FOUND, "No such room")),
                         }
-                        None => Err((HttpCode::NOT_FOUND, "No such room")),
+                    };
+                    match requests {
+                        Ok(Some(reqs)) => {
+                            Self::send_requests(reqs).await;
+                            Ok(None)
+                        }
+                        Ok(None) => Ok(None),
+                        Err(e) => Err(e),
                     }
                 }
                 Some(_) => Err((HttpCode::BAD_REQUEST, "Unknown room set argument")),
