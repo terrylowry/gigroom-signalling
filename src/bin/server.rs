@@ -22,9 +22,12 @@ struct Args {
     /// Port to listen on
     #[clap(short, long, default_value_t = 8443)]
     port: u16,
-    /// TLS certificate to use
-    #[clap(short, long)]
-    cert: Option<String>,
+    /// TLS certificate chain to use
+    #[clap(long)]
+    chain: Option<String>,
+    /// TLS certificate private key to use
+    #[clap(long)]
+    priv_key: Option<String>,
     /// password to TLS certificate
     #[clap(long)]
     cert_password: Option<String>,
@@ -42,21 +45,30 @@ async fn main() -> Result<(), Error> {
     // Create the event loop and TCP listener we'll accept connections on.
     let listener = TcpListener::bind(&addr).await?;
 
-    let acceptor = match args.cert {
-        Some(cert) => {
-            let mut file = fs::File::open(cert).await?;
-            let mut identity = vec![];
-            file.read_to_end(&mut identity).await?;
-            let identity = tokio_native_tls::native_tls::Identity::from_pkcs12(
-                &identity,
-                args.cert_password.as_deref().unwrap_or(""),
+    let acceptor = match (args.chain, args.priv_key) {
+        (Some(chain), Some(key)) => {
+            let mut chain_file = fs::File::open(chain).await?;
+            let mut chain_slice = Vec::new();
+            chain_file.read_to_end(&mut chain_slice).await?;
+            let mut key_file = fs::File::open(key).await?;
+            let mut key_slice = Vec::new();
+            key_file.read_to_end(&mut key_slice).await?;
+            let identity = tokio_native_tls::native_tls::Identity::from_pkcs8(
+                &chain_slice,
+                &key_slice,
             )
             .unwrap();
             Some(tokio_native_tls::TlsAcceptor::from(
                 TlsAcceptor::new(identity).unwrap(),
             ))
         }
-        None => None,
+        // TODO: Use Arg::requires() in the clap builder API instead of clap::_derive which can't
+        // describe args that require other args.
+        (Some(_), None) | (None, Some(_)) => {
+            error!("Both --chain and --key should be passed or neither");
+            std::process::exit(1);
+        }
+        (None, None) => None,
     };
 
     info!("Listening on: {}", addr);
