@@ -222,83 +222,19 @@ Failure response:
 ]
 ```
 
-### `room edit allow` | `disallow`
-
-Place a list of users on the allow-list for a room, or remove them from the allow-list. Only the creator of the room is allowed to send this request.
-
-Peers do not have to be online to be added to (or removed from) the allow-list of a room.
-
-The **`disallow`** request ignores user IDs that aren't already in the allow-list. You will receive a success response for such a request.
-
-If you **`disallow`** a user who is already in the room, the user will be kicked out as if they had sent a **`room leave`** request.
-
-```js
-[
-    {
-        "type": "request",
-        "request_id": "4",
-        // Room "Violin Ensemble"
-        "room_id": "dca2c32c-caa6-4ed6-8b86-1c0cd7339a4c",
-        "args": ["room", "edit", "allow", "Lao88", "Taiki97"]
-    }
-]
-```
-
-Success response:
-
-
-```js
-[
-    {
-        "type": "response",
-        "request_id": "4",
-        "status_code": 200,
-        "args": []
-    }
-]
-```
-
-### `room get allowed-users`
-
-Return a list of users that are in the allow-list for the specified room.
-
-```js
-[
-    {
-        "type": "request",
-        "request_id": "5",
-        // Room "Violin Ensemble"
-        "room_id": "dca2c32c-caa6-4ed6-8b86-1c0cd7339a4c",
-        "args": ["room", "get", "allowed-users"]
-    }
-]
-```
-
-Success response:
-
-
-```js
-[
-    {
-        "type": "response",
-        "request_id": "5",
-        "status_code": 200,
-        "args": ["Lao88", "Taiki97"]
-    }
-]
-```
-
 ### `room set allowed-users`
 
-Instead of using a combination of `room edit allow` and `room edit disallow`, you can use `room set allowed-users` to set it directly. This will disallow all users that aren't in the list, and allow all users that are in the list.
+Set the current list of allowed users. The creator is always implicitly in the list of allowed members, so you can never remove it from the list. 
 
-The same side-effects as `edit allow|disallow` apply.
+Users do not have to be connected via a client to be added to (or removed from) the allow-list of a room. If they are connected, all their clients will receive a `room created` message when they are added to the allow-list.
+
+If you *disallow* a user who is already in the room, the user will be kicked out as if they had sent a **`room leave`** request.
 
 ```js
 [
     {
         "type": "request",
-        "request_id": "6",
+        "request_id": "5",
         // Room "Violin Ensemble"
         "room_id": "dca2c32c-caa6-4ed6-8b86-1c0cd7339a4c",
         "args": ["room", "set", "allowed-users", "Lao88", "Taiki97", "DambisaM"]
@@ -313,9 +249,39 @@ Success response:
 [
     {
         "type": "response",
-        "request_id": "6",
+        "request_id": "5",
         "status_code": 200,
         "args": []
+    }
+]
+```
+
+### `room get allowed-users`
+
+Return a list of users that are in the allow-list for the specified room.
+
+```js
+[
+    {
+        "type": "request",
+        "request_id": "6",
+        // Room "Violin Ensemble"
+        "room_id": "dca2c32c-caa6-4ed6-8b86-1c0cd7339a4c",
+        "args": ["room", "get", "allowed-users"]
+    }
+]
+```
+
+Success response:
+
+
+```js
+[
+    {
+        "type": "response",
+        "request_id": "6",
+        "status_code": 200,
+        "args": ["Lao88", "Taiki97", "DambisaM"]
     }
 ]
 ```
@@ -448,9 +414,10 @@ You will receive a message like this:
 
 ### `room destroyed` (server) (🖅 allowed)
 
-This means the group call has ended. You will receive this message in two cases:
+This means the group call has ended. You will receive this message in three cases:
 
 * The room has been destroyed by the Creator while you were in it or you were in the allowed list. This serves as an update notification for the list you received in `room list`.
+* You have been removed from the allow-list of the room while you were in it or you were in the allowed list. This serves as an update notification for the list you received in `room list`.
 * The room was destroyed because everyone left the room (which automatically destroys it) while you were in the allowed list but *not* in the room itself (since there is no one remaining in the room to receive a `destroyed` in that case).
 
 You will receive a message like this:
@@ -513,7 +480,7 @@ You will receive a message like this:
         "type": "request",
         "request_id": "488a8184",
         "room_id": "dca2c32c-caa6-4ed6-8b86-1c0cd7339a4c",
-        "args": ["room", "allow", "Lao88", "DambisaM"]
+        "args": ["room", "set", "allowed-users", "Lao88", "DambisaM"]
     },
     {
         "type": "request",

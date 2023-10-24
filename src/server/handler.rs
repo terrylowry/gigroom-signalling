@@ -539,62 +539,6 @@ impl Handler {
                     Err(e) => Err(e),
                 }
             }
-            Some("edit") => {
-                let requests = {
-                    let mut rooms = server_state.rooms.lock().unwrap();
-                    match rooms.get_mut(&room_id) {
-                        Some(room) => {
-                            if room.creator == user_id {
-                                match args.next().and_then(|v| v.as_str()) {
-                                    Some("allow") => {
-                                        for user_id in args.filter_map(|v| v.as_str()) {
-                                            if room.allowed_users.contains(user_id) {
-                                                continue;
-                                            }
-                                            // Blindly trust that the creator knows that these
-                                            // UserID values are (or will be) valid
-                                            room.allowed_users.insert(user_id.to_string());
-                                        }
-                                        Ok(Some(Self::users_craft_created_messages(
-                                            room.allowed_users.iter(),
-                                            &room_id,
-                                            room,
-                                            &server_state.clients,
-                                        )))
-                                    }
-                                    Some("disallow") => {
-                                        let mut requests = Vec::new();
-                                        for user_id in args.filter_map(|v| v.as_str()) {
-                                            if user_id != room.creator {
-                                                room.allowed_users.remove(user_id);
-                                                requests.extend(Self::room_remove_user(
-                                                    user_id,
-                                                    &room_id,
-                                                    room,
-                                                    &server_state.clients,
-                                                ))
-                                            }
-                                        }
-                                        Ok(Some(requests))
-                                    }
-                                    _ => Err((HttpCode::BAD_REQUEST, "Unknown room edit argument")),
-                                }
-                            } else {
-                                Err((HttpCode::FORBIDDEN, "Not allowed to edit room"))
-                            }
-                        }
-                        None => Err((HttpCode::NOT_FOUND, "No such room")),
-                    }
-                };
-                match requests {
-                    Ok(Some(reqs)) => {
-                        Self::send_requests(reqs).await;
-                        Ok(None)
-                    }
-                    Ok(None) => Ok(None),
-                    Err(e) => Err(e),
-                }
-            }
             Some("get") => match args.next().and_then(|v| v.as_str()) {
                 Some("allowed-users") => {
                     let rooms = server_state.rooms.lock().unwrap();

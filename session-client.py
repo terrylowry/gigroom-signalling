@@ -63,7 +63,7 @@ class Context:
         return self.build_request(['join'], room_id=room_id)
 
     def allow_member(self, user_ids, room_id=DEFAULT_ROOM_ID):
-        return self.build_request(['edit', 'allow'] + user_ids, room_id=room_id)
+        return self.build_request(['set', 'allowed-users'] + user_ids, room_id=room_id)
 
     def set_allowed_members(self, user_ids, room_id=DEFAULT_ROOM_ID):
         return self.build_request(['set', 'allowed-users'] + user_ids, room_id=room_id)
