@@ -14,7 +14,7 @@ import websockets
 import argparse
 
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument('--url', default='wss://localhost:8443', help='URL to connect to')
+parser.add_argument('--url', default='ws://localhost:8443', help='URL to connect to')
 parser.add_argument('--user-id', default=str(uuid.uuid4())[:6], help='User ID to use')
 parser.add_argument('--allow-user-ids', default=[], type=lambda t: [s.strip() for s in t.split(',')], help='User IDs to allow in the rooms (comma separated)')
 
