@@ -53,11 +53,9 @@ async fn main() -> Result<(), Error> {
             let mut key_file = fs::File::open(key).await?;
             let mut key_slice = Vec::new();
             key_file.read_to_end(&mut key_slice).await?;
-            let identity = tokio_native_tls::native_tls::Identity::from_pkcs8(
-                &chain_slice,
-                &key_slice,
-            )
-            .unwrap();
+            let identity =
+                tokio_native_tls::native_tls::Identity::from_pkcs8(&chain_slice, &key_slice)
+                    .unwrap();
             Some(tokio_native_tls::TlsAcceptor::from(
                 TlsAcceptor::new(identity).unwrap(),
             ))
