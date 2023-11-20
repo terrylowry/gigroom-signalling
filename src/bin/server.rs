@@ -1,11 +1,12 @@
 use clap::Parser;
-use tokio::io::AsyncReadExt;
 use tokio::task;
 
-use anyhow::Error;
-use tokio::fs;
+use anyhow::{anyhow, bail, Error};
+use std::io::BufReader;
+use std::sync::Arc;
 use tokio::net::TcpListener;
-use tokio_native_tls::native_tls::TlsAcceptor;
+use tokio_rustls::rustls::{Certificate, PrivateKey, ServerConfig};
+use tokio_rustls::TlsAcceptor;
 
 use gigroom_signalling::server::Server;
 
@@ -47,24 +48,33 @@ async fn main() -> Result<(), Error> {
 
     let acceptor = match (args.chain, args.priv_key) {
         (Some(chain), Some(key)) => {
-            let mut chain_file = fs::File::open(chain).await?;
-            let mut chain_slice = Vec::new();
-            chain_file.read_to_end(&mut chain_slice).await?;
-            let mut key_file = fs::File::open(key).await?;
-            let mut key_slice = Vec::new();
-            key_file.read_to_end(&mut key_slice).await?;
-            let identity =
-                tokio_native_tls::native_tls::Identity::from_pkcs8(&chain_slice, &key_slice)
-                    .unwrap();
-            Some(tokio_native_tls::TlsAcceptor::from(
-                TlsAcceptor::new(identity).unwrap(),
-            ))
+            let chain_file = std::fs::File::open(chain)?;
+            let mut reader = BufReader::new(chain_file);
+            let certs = rustls_pemfile::certs(&mut reader)?;
+
+            let key_file = std::fs::File::open(key)?;
+            let mut reader = BufReader::new(key_file);
+            let mut keys = rustls_pemfile::pkcs8_private_keys(&mut reader)?;
+
+            let private_key = match keys.len() {
+                0 => Err(anyhow!("No keys found in priv key")),
+                1 => Ok(keys.remove(0)),
+                _ => Err(anyhow!("More than one key found in priv key")),
+            }?;
+            let config = ServerConfig::builder()
+                .with_safe_defaults()
+                .with_no_client_auth()
+                .with_single_cert(
+                    certs.into_iter().map(Certificate).collect(),
+                    PrivateKey(private_key),
+                )
+                .expect("bad cert/key");
+            Some(TlsAcceptor::from(Arc::new(config)))
         }
         // TODO: Use Arg::requires() in the clap builder API instead of clap::_derive which can't
         // describe args that require other args.
         (Some(_), None) | (None, Some(_)) => {
-            error!("Both --chain and --key should be passed or neither");
-            std::process::exit(1);
+            bail!("Both --chain and --key should be passed or neither");
         }
         (None, None) => None,
     };
