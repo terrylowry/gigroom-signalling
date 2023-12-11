@@ -11,6 +11,7 @@ import json
 import uuid
 import asyncio
 import websockets
+import websockets.client
 import argparse
 
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -177,13 +178,13 @@ def send_sdp_ice():
 print('Our uid is {!r}'.format(options.user_id))
 
 async def main():
-    async with websockets.connect(SERVER_ADDR, ssl=sslctx) as ws:
+    async with websockets.client.connect(SERVER_ADDR, ssl=sslctx) as ws:
         ctx = Context(ws, options.user_id)
         await ctx.loop()
 
 try:
         asyncio.run(main())
-except websockets.exceptions.InvalidHandshake:
+except websockets.InvalidHandshake:
     print('Invalid handshake: are you sure this is a websockets server?\n')
     raise
 except ssl.SSLError:
