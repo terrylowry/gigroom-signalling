@@ -8,7 +8,7 @@ use tokio::net::TcpListener;
 use tokio_rustls::rustls::{Certificate, PrivateKey, ServerConfig};
 use tokio_rustls::TlsAcceptor;
 
-use gigroom_signalling::server::Server;
+use gigroom_signalling::server::{Server, ServerError};
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace, warn};
@@ -81,32 +81,32 @@ async fn main() -> Result<(), Error> {
 
     info!("Listening on: {}", addr);
 
-    while let Ok((stream, _)) = listener.accept().await {
-        let mut server_clone = server.clone();
-
-        let address = match stream.peer_addr() {
-            Ok(address) => address,
+    loop {
+        let (stream, address) = match listener.accept().await {
+            Ok((s, a)) => (s, a),
             Err(err) => {
-                warn!("Connected peer with no address: {}", err);
+                warn!("Failed to accept TCP connection {:?}", err);
                 continue;
-            }
+            },
         };
 
-        info!("Accepting connection from {}", address);
+        let mut server = server.clone();
+        let acceptor = acceptor.clone();
 
-        if let Some(ref acceptor) = acceptor {
-            let stream = match acceptor.accept(stream).await {
-                Ok(stream) => stream,
-                Err(err) => {
-                    warn!("Failed to accept TLS connection from {}: {}", address, err);
-                    continue;
+        if let Some(acceptor) = acceptor {
+            info!("Accepting TLS connection from {}", address);
+            task::spawn(async move {
+                match acceptor.accept(stream).await {
+                    Ok(stream) => server.accept_async(stream).await,
+                    Err(err) => {
+                        warn!("Failed to accept TLS connection: {:?}", err);
+                        Err(ServerError::TLSHandshake(err))
+                    }
                 }
-            };
-            task::spawn(async move { server_clone.accept_async(stream).await });
+            });
         } else {
-            task::spawn(async move { server_clone.accept_async(stream).await });
+            info!("Accepting connection from {}", address);
+            task::spawn(async move { server.accept_async(stream).await });
         }
     }
-
-    Ok(())
 }

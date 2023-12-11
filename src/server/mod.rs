@@ -57,8 +57,10 @@ pub struct Server {
 
 #[derive(thiserror::Error, Debug)]
 pub enum ServerError {
-    #[error("error during handshake {0}")]
-    Handshake(#[from] tokio_tungstenite::tungstenite::Error),
+    #[error("error during TLS handshake {0}")]
+    TLSHandshake(#[from] std::io::Error),
+    #[error("error during WS handshake {0}")]
+    WSHandshake(#[from] tokio_tungstenite::tungstenite::Error),
 }
 
 #[derive(Clone, Debug)]
@@ -174,7 +176,7 @@ impl Server {
             Ok(ws) => ws,
             Err(err) => {
                 warn!("Error during the websocket handshake: {}", err);
-                return Err(ServerError::Handshake(err));
+                return Err(ServerError::WSHandshake(err));
             }
         };
 
