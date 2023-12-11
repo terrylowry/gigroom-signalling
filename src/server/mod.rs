@@ -59,6 +59,8 @@ pub struct Server {
 pub enum ServerError {
     #[error("error during TLS handshake {0}")]
     TLSHandshake(#[from] std::io::Error),
+    #[error("timeout during TLS handshake {0}")]
+    TLSHandshakeTimeout(#[from] tokio::time::error::Elapsed),
     #[error("error during WS handshake {0}")]
     WSHandshake(#[from] tokio_tungstenite::tungstenite::Error),
 }

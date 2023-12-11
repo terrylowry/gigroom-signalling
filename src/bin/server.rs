@@ -5,6 +5,7 @@ use anyhow::{anyhow, bail, Error};
 use std::io::BufReader;
 use std::sync::Arc;
 use tokio::net::TcpListener;
+use tokio::time::Duration;
 use tokio_rustls::rustls::{Certificate, PrivateKey, ServerConfig};
 use tokio_rustls::TlsAcceptor;
 
@@ -96,11 +97,15 @@ async fn main() -> Result<(), Error> {
         if let Some(acceptor) = acceptor {
             info!("Accepting TLS connection from {}", address);
             task::spawn(async move {
-                match acceptor.accept(stream).await {
-                    Ok(stream) => server.accept_async(stream).await,
-                    Err(err) => {
+                match tokio::time::timeout(Duration::from_secs(5), acceptor.accept(stream)).await {
+                    Ok(Ok(stream)) => server.accept_async(stream).await,
+                    Ok(Err(err)) => {
                         warn!("Failed to accept TLS connection: {:?}", err);
                         Err(ServerError::TLSHandshake(err))
+                    },
+                    Err(elapsed) => {
+                        warn!("TLS connection timed out {} after {}", address, elapsed);
+                        Err(ServerError::TLSHandshakeTimeout(elapsed))
                     }
                 }
             });
