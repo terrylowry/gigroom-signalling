@@ -417,54 +417,48 @@ impl Handler {
         let arg1 = args.next().and_then(|v| v.as_str());
         let room_id = match room_id {
             Some(room_id) => {
-                if let Ok(room_id) = Uuid::try_parse(room_id) {
-                    room_id
-                } else {
+                let Ok(room_id) = Uuid::try_parse(room_id) else {
                     let args = vec![Value::String("Bad room_id, must be UUID4".to_string())];
                     return Self::make_response(
                         HttpCode::BAD_REQUEST,
                         Some(args),
                         Some(request_id),
                     );
-                }
+                };
+                room_id
             }
             None => {
-                let args = match arg1 {
-                    Some("list") => {
-                        let rooms = server_state.rooms.lock().unwrap();
-                        let args: Vec<Value> = rooms
-                            .iter()
-                            .filter(|(_, room)| room.allowed_users.contains(user_id))
-                            .map(|(id, room)| {
-                                let mut v = serde_json::Map::new();
-                                v.insert("room_id".to_string(), Value::String(id.to_string()));
-                                v.insert(
-                                    "room_name".to_string(),
-                                    Value::String(room.name.to_string()),
-                                );
-                                v.insert(
-                                    "creator".to_string(),
-                                    Value::String(room.creator.clone()),
-                                );
-                                let active = !room.current_clients.is_empty();
-                                v.insert("active".to_string(), Value::Bool(active));
-                                Value::Object(v)
-                            })
-                            .collect();
-                        args
-                    }
-                    Some(_) => {
-                        let args = vec![Value::String("room_id not specified".to_string())];
-                        return Self::make_response(
-                            HttpCode::BAD_REQUEST,
-                            Some(args),
-                            Some(request_id),
-                        );
-                    }
-                    None => {
-                        return Self::make_response(HttpCode::BAD_REQUEST, None, Some(request_id));
-                    }
+                let Some(args) = arg1 else {
+                    return Self::make_response(HttpCode::BAD_REQUEST, None, Some(request_id));
                 };
+                if args != "list" {
+                    let args = vec![Value::String("room_id not specified".to_string())];
+                    return Self::make_response(
+                        HttpCode::BAD_REQUEST,
+                        Some(args),
+                        Some(request_id),
+                    );
+                }
+                let rooms = server_state.rooms.lock().unwrap();
+                let args: Vec<Value> = rooms
+                    .iter()
+                    .filter(|(_, room)| room.allowed_users.contains(user_id))
+                    .map(|(id, room)| {
+                        let mut v = serde_json::Map::new();
+                        v.insert("room_id".to_string(), Value::String(id.to_string()));
+                        v.insert(
+                            "room_name".to_string(),
+                            Value::String(room.name.to_string()),
+                        );
+                        v.insert(
+                            "creator".to_string(),
+                            Value::String(room.creator.clone()),
+                        );
+                        let active = !room.current_clients.is_empty();
+                        v.insert("active".to_string(), Value::Bool(active));
+                        Value::Object(v)
+                    })
+                    .collect();
                 return Self::make_response(HttpCode::OK, Some(args), Some(request_id));
             }
         };

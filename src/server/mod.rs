@@ -97,42 +97,36 @@ impl Server {
     {
         // If the peer does not successfully identify, we will drop the connection
         let client = { state.clients.lock().unwrap().connected.remove(&client_id) };
-        match client {
-            Some(client) => match msg.split_once(' ') {
-                // XXX: Add peer version reporting here
-                Some(("IDENTIFY", got_peer_id)) => {
-                    {
-                        let mut clients = state.clients.lock().unwrap();
-                        clients
-                            .identified
-                            .insert(client_id, (got_peer_id.to_string(), client));
-                        match clients.user_clients.get_mut(got_peer_id) {
-                            Some(client_ids) => {
-                                client_ids.insert(client_id);
-                            }
-                            None => {
-                                clients
-                                    .user_clients
-                                    .insert(got_peer_id.to_string(), HashSet::from([client_id]));
-                            }
-                        };
-                    }
-                    ws_sender
-                        .send(Message::Text(format!("IDENTIFIED {}", client_id)))
-                        .await
-                        .ok()?;
-                    Some(got_peer_id.to_string())
+        let Some(client) = client else {
+            error!("Invalid client state {:?}, disconnecting", client_id);
+            return None;
+        };
+        let Some(("IDENTIFY", got_peer_id)) = msg.split_once(' ') else {
+            error!("No identification, disconnect");
+            return None;
+        };
+        // XXX: Add peer version reporting here
+        {
+            let mut clients = state.clients.lock().unwrap();
+            clients
+                .identified
+                .insert(client_id, (got_peer_id.to_string(), client));
+            match clients.user_clients.get_mut(got_peer_id) {
+                Some(client_ids) => {
+                    client_ids.insert(client_id);
                 }
-                _ => {
-                    error!("No identification, disconnect");
-                    None
+                None => {
+                    clients
+                        .user_clients
+                        .insert(got_peer_id.to_string(), HashSet::from([client_id]));
                 }
-            },
-            None => {
-                error!("Invalid client state {:?}, disconnecting", client_id);
-                None
-            }
+            };
         }
+        ws_sender
+            .send(Message::Text(format!("IDENTIFIED {}", client_id)))
+            .await
+            .ok()?;
+        Some(got_peer_id.to_string())
     }
 
     async fn remove_client<S: 'static>(
@@ -204,11 +198,8 @@ impl Server {
                     let user_id =
                         Self::identify_client(&msg, &state_clone, client_id, &mut ws_sender).await;
                     if let Some(user_id) = user_id {
-                        match ident_sink.send((client_id, user_id.clone())) {
-                            Ok(()) => {}
-                            Err(_) => {
-                                error!("Failed to complete ident: cmd_loop already dropped!");
-                            }
+                        if let Err(_) = ident_sink.send((client_id, user_id.clone())) {
+                            error!("Failed to complete ident: cmd_loop already dropped!");
                         }
                         true
                     } else {
