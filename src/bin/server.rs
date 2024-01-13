@@ -80,13 +80,13 @@ async fn main() -> Result<(), Error> {
             task::spawn(async move {
                 // This should not fail, since tls_config() succeeded previously
                 let mut chain_mtime = std::fs::metadata(&chain)
-                    .expect(&format!("stat failed: {}", chain))
+                    .unwrap_or_else(|_| panic!("stat failed: {}", chain))
                     .modified()
-                    .expect(&format!("mtime failed: {}", chain));
+                    .unwrap_or_else(|_| panic!("mtime failed: {}", chain));
                 let mut key_mtime = std::fs::metadata(&key)
-                    .expect(&format!("stat failed: {}", key))
+                    .unwrap_or_else(|_| panic!("stat failed: {}", key))
                     .modified()
-                    .expect(&format!("mtime failed: {}", key));
+                    .unwrap_or_else(|_| panic!("mtime failed: {}", key));
                 let mut interval = tokio::time::interval(Duration::from_secs(3600));
                 let changed = |path: &str, last_mtime: &mut std::time::SystemTime| -> bool {
                     if let Ok(m) = std::fs::metadata(path) {
