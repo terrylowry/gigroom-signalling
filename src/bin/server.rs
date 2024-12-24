@@ -2,12 +2,12 @@ use clap::Parser;
 use tokio::task;
 
 use anyhow::{anyhow, bail, Error};
-use std::io::BufReader;
+use rustls_pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
-use tokio_rustls::rustls::{Certificate, PrivateKey, ServerConfig};
+use tokio_rustls::rustls::ServerConfig;
 use tokio_rustls::TlsAcceptor;
 
 use gigroom_signalling::server::{Server, ServerError};
@@ -41,26 +41,14 @@ fn tls_config(
     chain: &str,
     key: &str,
 ) -> Result<ServerConfig, Error> {
-    let chain_file = std::fs::File::open(chain)?;
-    let mut reader = BufReader::new(chain_file);
-    let certs = rustls_pemfile::certs(&mut reader)?;
-
-    let key_file = std::fs::File::open(key)?;
-    let mut reader = BufReader::new(key_file);
-    let mut keys = rustls_pemfile::pkcs8_private_keys(&mut reader)?;
-
-    let private_key = match keys.len() {
-        0 => Err(anyhow!("No keys found in priv key")),
-        1 => Ok(keys.remove(0)),
-        _ => Err(anyhow!("More than one key found in priv key")),
-    }?;
+    let certs = CertificateDer::pem_file_iter(chain)?
+        .into_iter()
+        .filter_map(|c| c.ok())
+        .collect();
+    let key = PrivateKeyDer::from_pem_file(key)?;
     ServerConfig::builder()
-        .with_safe_defaults()
         .with_no_client_auth()
-        .with_single_cert(
-            certs.into_iter().map(Certificate).collect(),
-            PrivateKey(private_key),
-        )
+        .with_single_cert(certs, key)
         .map_err(|x| anyhow!("ServerConfig build failed: {:?}", x))
 }
 
