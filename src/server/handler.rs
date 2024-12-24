@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
+use log::{log_enabled, Level::Debug};
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace, warn};
@@ -31,8 +32,8 @@ impl Handler {
             let v: Result<Requests, serde_json::Error> = serde_json::from_str(&msg);
             let rsp = match v {
                 Ok(v) => {
-                    debug!("{}", format!("{server_state:#?}"));
-                    {
+                    if log_enabled!(Debug) {
+                        debug!("{}", format!("{server_state:#?}"));
                         let rooms = server_state.rooms.lock().unwrap();
                         debug!("{}", format!("{rooms:#?}"));
                     }
