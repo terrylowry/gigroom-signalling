@@ -3,6 +3,7 @@ use tokio::task;
 
 use anyhow::{anyhow, bail, Error};
 use std::io::BufReader;
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
@@ -20,10 +21,11 @@ use log::{debug, error, info, trace, warn};
 struct Args {
     /// Address to listen on
     #[clap(long, default_value = "0.0.0.0")]
-    host: String,
+    addr: IpAddr,
     /// Port to listen on
-    #[clap(short, long, default_value_t = 8443)]
+    #[clap(short, long, default_value_t = 8443, value_parser = clap::value_parser!(u16).range(1..))]
     port: u16,
+
     /// TLS certificate chain to use
     #[clap(long)]
     chain: Option<String>,
@@ -68,8 +70,6 @@ async fn main() -> Result<(), Error> {
 
     let args = Args::parse();
     let server = Server::new();
-
-    let addr = format!("{}:{}", args.host, args.port);
 
     let acceptor = match (args.chain, args.priv_key) {
         (Some(chain), Some(key)) => {
@@ -127,9 +127,9 @@ async fn main() -> Result<(), Error> {
     };
 
     // Create the event loop and TCP listener we'll accept connections on.
-    let listener = TcpListener::bind(&addr).await?;
+    let listener = TcpListener::bind((args.addr, args.port)).await?;
 
-    info!("Listening on: {}", addr);
+    info!("Listening on: {:?}", listener.local_addr());
 
     loop {
         let (stream, address) = match listener.accept().await {
