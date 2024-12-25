@@ -1,9 +1,12 @@
 use clap::Parser;
 use tokio::task;
 
-use anyhow::{anyhow, bail, Error};
+use anyhow::{anyhow, bail, Error, Result};
 use rustls_pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
+use std::fs::File;
+use std::io::BufReader;
 use std::net::IpAddr;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
@@ -32,9 +35,13 @@ struct Args {
     /// TLS certificate private key to use
     #[clap(long)]
     priv_key: Option<String>,
-    /// password to TLS certificate
+    /// TLS certificate password (optional)
     #[clap(long)]
     cert_password: Option<String>,
+
+    /// JSON file containing necessary secrets: jwt_key
+    #[arg(long, value_name = "FILE")]
+    secrets: PathBuf,
 }
 
 fn tls_config(
@@ -52,60 +59,77 @@ fn tls_config(
         .map_err(|x| anyhow!("ServerConfig build failed: {:?}", x))
 }
 
+fn make_acceptor(
+    chain: &str,
+    key: &str,
+) -> Result<Arc<TlsAcceptor>> {
+    let mut acceptor = Arc::new(TlsAcceptor::from(Arc::new(tls_config(chain, key)?)));
+    let acceptor_clone = acceptor.clone();
+    let chain = chain.to_string();
+    let key = key.to_string();
+
+    // Monitor certs for rotation
+    task::spawn(async move {
+        // This should not fail, since tls_config() succeeded previously
+        let mut chain_mtime = std::fs::metadata(&chain)
+            .unwrap_or_else(|_| panic!("stat failed: {}", chain))
+            .modified()
+            .unwrap_or_else(|_| panic!("mtime failed: {}", chain));
+        let mut key_mtime = std::fs::metadata(&key)
+            .unwrap_or_else(|_| panic!("stat failed: {}", key))
+            .modified()
+            .unwrap_or_else(|_| panic!("mtime failed: {}", key));
+        let mut interval = tokio::time::interval(Duration::from_secs(3600));
+        let changed = |path: &str, last_mtime: &mut std::time::SystemTime| -> bool {
+            if let Ok(m) = std::fs::metadata(path) {
+                if let Ok(mtime) = m.modified() {
+                    if mtime > *last_mtime {
+                        *last_mtime = mtime;
+                        return true;
+                    }
+                }
+            }
+            false
+        };
+        loop {
+            interval.tick().await;
+            if changed(&chain, &mut chain_mtime) || changed(&key, &mut key_mtime) {
+                match tls_config(&chain, &key) {
+                    Ok(config) => {
+                        info!("New certificate, resetting TlsAcceptor");
+                        let new_acceptor = TlsAcceptor::from(Arc::new(config));
+                        (*Arc::make_mut(&mut acceptor)) = new_acceptor;
+                    }
+                    Err(error) => error!(
+                        "Detected cert change, but failed to load certs: {:?}",
+                        error
+                    ),
+                }
+            }
+        }
+    });
+    Ok(acceptor_clone)
+}
+
+fn parse_secrets(secrets_file: &Path) -> Result<String> {
+    let file = File::open(secrets_file)?;
+    let reader = BufReader::new(file);
+    let v: serde_json::Map<String, serde_json::Value> = serde_json::from_reader(reader)?;
+    v.get("jwt_key")
+        .map(|v| v.as_str().map(|s| s.to_string()))
+        .flatten()
+        .ok_or_else(|| anyhow!("jwt_key is missing"))
+}
+
 #[tokio::main]
-async fn main() -> Result<(), Error> {
+async fn main() -> Result<()> {
     env_logger::init();
 
     let args = Args::parse();
-    let server = Server::new();
+    let server = Server::new(parse_secrets(&args.secrets)?);
 
     let acceptor = match (args.chain, args.priv_key) {
-        (Some(chain), Some(key)) => {
-            let mut acceptor = Arc::new(TlsAcceptor::from(Arc::new(tls_config(&chain, &key)?)));
-            let acceptor_clone = acceptor.clone();
-            let chain = chain.clone();
-            let key = key.clone();
-            task::spawn(async move {
-                // This should not fail, since tls_config() succeeded previously
-                let mut chain_mtime = std::fs::metadata(&chain)
-                    .unwrap_or_else(|_| panic!("stat failed: {}", chain))
-                    .modified()
-                    .unwrap_or_else(|_| panic!("mtime failed: {}", chain));
-                let mut key_mtime = std::fs::metadata(&key)
-                    .unwrap_or_else(|_| panic!("stat failed: {}", key))
-                    .modified()
-                    .unwrap_or_else(|_| panic!("mtime failed: {}", key));
-                let mut interval = tokio::time::interval(Duration::from_secs(3600));
-                let changed = |path: &str, last_mtime: &mut std::time::SystemTime| -> bool {
-                    if let Ok(m) = std::fs::metadata(path) {
-                        if let Ok(mtime) = m.modified() {
-                            if mtime > *last_mtime {
-                                *last_mtime = mtime;
-                                return true;
-                            }
-                        }
-                    }
-                    false
-                };
-                loop {
-                    interval.tick().await;
-                    if changed(&chain, &mut chain_mtime) || changed(&key, &mut key_mtime) {
-                        match tls_config(&chain, &key) {
-                            Ok(config) => {
-                                info!("New certificate, resetting TlsAcceptor");
-                                let new_acceptor = TlsAcceptor::from(Arc::new(config));
-                                (*Arc::make_mut(&mut acceptor)) = new_acceptor;
-                            }
-                            Err(error) => error!(
-                                "Detected cert change, but failed to load certs: {:?}",
-                                error
-                            ),
-                        }
-                    }
-                }
-            });
-            Some(acceptor_clone)
-        }
+        (Some(chain), Some(key)) => Some(make_acceptor(&chain, &key)?),
         // TODO: Use Arg::requires() in the clap builder API instead of clap::_derive which can't
         // describe args that require other args.
         (Some(_), None) | (None, Some(_)) => {

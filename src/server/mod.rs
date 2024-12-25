@@ -1,7 +1,9 @@
-use anyhow::Error;
+use anyhow::{anyhow, Error, Result};
 use futures::channel::{mpsc, oneshot};
 use futures::prelude::*;
 use futures::stream::SplitSink;
+use jsonwebtoken as jwt;
+use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -18,6 +20,12 @@ use handler::Handler;
 
 type UserID = String;
 type ClientID = Uuid;
+type ClientVersion = String;
+#[derive(Eq, Hash, PartialEq, PartialOrd, Clone, Debug)]
+struct ClientInfo {
+    version: ClientVersion,
+}
+
 #[derive(Debug)]
 pub struct Client {
     _conn_handle: task::JoinHandle<Result<(), Error>>,
@@ -32,7 +40,7 @@ pub struct Clients {
     // Connected and identified
     identified: HashMap<ClientID, (UserID, Client)>,
     // All connected clients identified as UserID, reverse mapping of the above for convenience
-    user_clients: HashMap<UserID, HashSet<ClientID>>,
+    user_clients: HashMap<UserID, HashMap<ClientID, ClientInfo>>,
 }
 
 type RoomID = Uuid;
@@ -53,6 +61,7 @@ pub struct State {
 #[derive(Clone, Debug)]
 pub struct Server {
     state: State,
+    jwt_key: String,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -71,8 +80,22 @@ pub enum WsMessage {
     Incoming(Message),
 }
 
+#[derive(Clone, Debug, Deserialize)]
+struct IdentifyPayload {
+    client_version: ClientVersion,
+    token: String,
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize)]
+struct TokenClaims {
+    username: String,
+    email: String,
+    exp: u64,
+}
+
 impl Server {
-    pub fn new() -> Self {
+    pub fn new(jwt_key: String) -> Self {
         let state = State {
             clients: Arc::new(Mutex::new(Clients {
                 connected: HashMap::new(),
@@ -82,11 +105,30 @@ impl Server {
             rooms: Arc::new(Mutex::new(HashMap::new())),
         };
 
-        Self { state }
+        Self { state, jwt_key }
+    }
+
+    fn parse_token(
+        &self,
+        token: &str,
+    ) -> Result<TokenClaims> {
+        let token_data = jwt::decode::<TokenClaims>(
+            &token,
+            &jwt::DecodingKey::from_secret(self.jwt_key.as_bytes()),
+            &jwt::Validation::new(jwt::Algorithm::HS256),
+        )?;
+
+        if token_data.claims.exp < jwt::get_current_timestamp() {
+            error!("auth token from {} expired", token_data.claims.username);
+            return Err(anyhow!("auth token expired"));
+        }
+
+        Ok(token_data.claims)
     }
 
     // TODO: This should do authentication using a token that is verified against the auth server.
     async fn identify_client<S: 'static>(
+        &self,
         msg: &str,
         state: &State,
         client_id: Uuid,
@@ -101,32 +143,60 @@ impl Server {
             error!("Invalid client state {:?}, disconnecting", client_id);
             return None;
         };
-        let Some(("IDENTIFY", got_peer_id)) = msg.split_once(' ') else {
+
+        let Some(("IDENTIFY", ident)) = msg.split_once(' ') else {
             error!("No identification, disconnect");
             return None;
         };
-        // XXX: Add peer version reporting here
+
+        let (got_peer_id, client_version) = match serde_json::from_str::<IdentifyPayload>(ident) {
+            Ok(payload) => {
+                let Ok(claims) = self.parse_token(&payload.token) else {
+                    error!("Invalid auth token, disconnect");
+                    return None;
+                };
+                (claims.username.to_string(), payload.client_version)
+            }
+            Err(_) => {
+                if !ident.is_ascii() || !ident.chars().all(char::is_alphanumeric) {
+                    error!("Invalid legacy peer_id: {}, disconnect", ident);
+                    return None;
+                }
+                // TODO: Eliminate this codepath when we have a new "known-good" tagged release of
+                // GigRoom. It's a security vulnerability.
+                warn!(
+                    "Legacy client connected, assuming payload `{}` is peer_id",
+                    ident
+                );
+                (ident.to_string(), "0.2.0".to_string())
+            }
+        };
+
         {
             let mut clients = state.clients.lock().unwrap();
+
             clients
                 .identified
-                .insert(client_id, (got_peer_id.to_string(), client));
-            match clients.user_clients.get_mut(got_peer_id) {
-                Some(client_ids) => {
-                    client_ids.insert(client_id);
-                }
-                None => {
-                    clients
-                        .user_clients
-                        .insert(got_peer_id.to_string(), HashSet::from([client_id]));
-                }
+                .insert(client_id, (got_peer_id.clone(), client));
+
+            let client_info = ClientInfo {
+                version: client_version,
             };
+            if let Some(client_ids) = clients.user_clients.get_mut(&got_peer_id) {
+                client_ids.insert(client_id, client_info);
+            } else {
+                clients.user_clients.insert(
+                    got_peer_id.clone(),
+                    HashMap::from([(client_id, client_info)]),
+                );
+            }
         }
+
         ws_sender
             .send(Message::Text(format!("IDENTIFIED {}", client_id)))
             .await
             .ok()?;
-        Some(got_peer_id.to_string())
+        Some(got_peer_id)
     }
 
     async fn remove_client<S: 'static>(
@@ -190,13 +260,15 @@ impl Server {
         ));
 
         let state_clone = self.state.clone();
+        let self_clone = self.clone();
         let _conn_handle = task::spawn(async move {
             let (mut ws_sender, ws_receiver) = ws_conn.split();
             let mut incoming = Box::pin(ws_receiver.map(|msg| msg.map(WsMessage::Incoming)));
             let identified = match incoming.next().await {
                 Some(Ok(WsMessage::Incoming(Message::Text(msg)))) => {
-                    let user_id =
-                        Self::identify_client(&msg, &state_clone, client_id, &mut ws_sender).await;
+                    let user_id = self_clone
+                        .identify_client(&msg, &state_clone, client_id, &mut ws_sender)
+                        .await;
                     if let Some(user_id) = user_id {
                         if let Err(_) = ident_sink.send((client_id, user_id.clone())) {
                             error!("Failed to complete ident: cmd_loop already dropped!");
@@ -265,11 +337,5 @@ impl Server {
         );
 
         Ok(())
-    }
-}
-
-impl Default for Server {
-    fn default() -> Self {
-        Server::new()
     }
 }

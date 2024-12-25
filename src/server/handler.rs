@@ -324,8 +324,8 @@ impl Handler {
             if let Some(client_ids) = client_list.user_clients.get(user_id) {
                 client_ids
                     .iter()
-                    .filter(|client_id| room.current_clients.remove(client_id))
-                    .map(|client_id| (user_id, *client_id))
+                    .filter(|client_id| room.current_clients.remove(client_id.0))
+                    .map(|client_id| (user_id, client_id.0.clone()))
                     .collect()
             } else {
                 Vec::new()
@@ -365,7 +365,7 @@ impl Handler {
             let clients = clients.lock().unwrap();
             for user in users {
                 if let Some(c) = clients.user_clients.get(user) {
-                    connected.extend(c)
+                    connected.extend(c.keys())
                 }
             }
         }
