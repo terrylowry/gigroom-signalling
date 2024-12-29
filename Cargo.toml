@@ -29,3 +29,7 @@ jsonwebtoken = "9"
 [[bin]]
 name = "signalling-server"
 path = "src/bin/server.rs"
+
+[[bin]]
+name = "echoclient-token-generator"
+path = "src/bin/echoclient-token-generator.rs"

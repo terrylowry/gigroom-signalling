@@ -11,6 +11,7 @@ use tokio::task;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
 use uuid::Uuid;
+use crate::TokenClaims;
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace, warn};
@@ -84,14 +85,6 @@ pub enum WsMessage {
 struct IdentifyPayload {
     client_version: ClientVersion,
     token: String,
-}
-
-#[allow(dead_code)]
-#[derive(Deserialize)]
-struct TokenClaims {
-    username: String,
-    email: String,
-    exp: u64,
 }
 
 impl Server {

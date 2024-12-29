@@ -3,10 +3,8 @@ use tokio::task;
 
 use anyhow::{anyhow, bail, Error, Result};
 use rustls_pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
-use std::fs::File;
-use std::io::BufReader;
 use std::net::IpAddr;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
@@ -14,6 +12,7 @@ use tokio_rustls::rustls::ServerConfig;
 use tokio_rustls::TlsAcceptor;
 
 use gigroom_signalling::server::{Server, ServerError};
+use gigroom_signalling::parse_secrets;
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace, warn};
@@ -109,16 +108,6 @@ fn make_acceptor(
         }
     });
     Ok(acceptor_clone)
-}
-
-fn parse_secrets(secrets_file: &Path) -> Result<String> {
-    let file = File::open(secrets_file)?;
-    let reader = BufReader::new(file);
-    let v: serde_json::Map<String, serde_json::Value> = serde_json::from_reader(reader)?;
-    v.get("jwt_key")
-        .map(|v| v.as_str().map(|s| s.to_string()))
-        .flatten()
-        .ok_or_else(|| anyhow!("jwt_key is missing"))
 }
 
 #[tokio::main]
