@@ -124,7 +124,7 @@ impl Handler {
         json!({
             "type": "response",
             "status_code": code.as_u16(),
-            "args": args.unwrap_or(vec![]),
+            "args": args.unwrap_or_default(),
             "request_id": request_id.unwrap_or(""),
         })
     }
@@ -325,7 +325,7 @@ impl Handler {
                 client_ids
                     .iter()
                     .filter(|client_id| room.current_clients.remove(client_id.0))
-                    .map(|client_id| (user_id, client_id.0.clone()))
+                    .map(|client_id| (user_id, *client_id.0))
                     .collect()
             } else {
                 Vec::new()
@@ -764,10 +764,7 @@ impl Handler {
             .unzip()
             .0
             .unwrap_or(HttpCode::OK);
-        let args = response_args.map_or_else(
-            |(error, _)| Some(vec![Value::String(error.to_string())]),
-            |v| v,
-        );
+        let args = response_args.unwrap_or_else(|(error, _)| Some(vec![Value::String(error.to_string())]));
         Self::make_response(code, args, Some(request_id))
     }
 

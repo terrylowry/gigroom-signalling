@@ -106,7 +106,7 @@ impl Server {
         token: &str,
     ) -> Result<TokenClaims> {
         let token_data = jwt::decode::<TokenClaims>(
-            &token,
+            token,
             &jwt::DecodingKey::from_secret(self.jwt_key.as_bytes()),
             &jwt::Validation::new(jwt::Algorithm::HS256),
         )?;
@@ -120,7 +120,7 @@ impl Server {
     }
 
     // TODO: This should do authentication using a token that is verified against the auth server.
-    async fn identify_client<S: 'static>(
+    async fn identify_client<S>(
         &self,
         msg: &str,
         state: &State,
@@ -128,7 +128,7 @@ impl Server {
         ws_sender: &mut SplitSink<WebSocketStream<S>, Message>,
     ) -> Option<UserID>
     where
-        S: AsyncRead + AsyncWrite + Unpin + Send,
+        S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     {
         // If the peer does not successfully identify, we will drop the connection
         let client = { state.clients.lock().unwrap().connected.remove(&client_id) };
@@ -192,13 +192,13 @@ impl Server {
         Some(got_peer_id)
     }
 
-    async fn remove_client<S: 'static>(
+    async fn remove_client<S>(
         state: State,
         mut ws_sender: SplitSink<WebSocketStream<S>, Message>,
         client_id: Uuid,
     ) -> Result<(), Error>
     where
-        S: AsyncRead + AsyncWrite + Unpin + Send,
+        S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     {
         {
             let mut clients = state.clients.lock().unwrap();
@@ -224,12 +224,12 @@ impl Server {
         Ok::<(), Error>(())
     }
 
-    pub async fn accept_async<S: 'static>(
+    pub async fn accept_async<S>(
         &mut self,
         stream: S,
     ) -> Result<(), ServerError>
     where
-        S: AsyncRead + AsyncWrite + Unpin + Send,
+        S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     {
         let ws_conn = match tokio_tungstenite::accept_async(stream).await {
             Ok(ws) => ws,
@@ -263,7 +263,7 @@ impl Server {
                         .identify_client(&msg, &state_clone, client_id, &mut ws_sender)
                         .await;
                     if let Some(user_id) = user_id {
-                        if let Err(_) = ident_sink.send((client_id, user_id.clone())) {
+                        if ident_sink.send((client_id, user_id.clone())).is_err() {
                             error!("Failed to complete ident: cmd_loop already dropped!");
                         }
                         true

@@ -48,7 +48,6 @@ fn tls_config(
     key: &str,
 ) -> Result<ServerConfig, Error> {
     let certs = CertificateDer::pem_file_iter(chain)?
-        .into_iter()
         .filter_map(|c| c.ok())
         .collect();
     let key = PrivateKeyDer::from_pem_file(key)?;
