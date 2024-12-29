@@ -7,6 +7,13 @@ use std::path::PathBuf;
 #[derive(Parser, Debug)]
 #[command(version, about)]
 struct Args {
+    /// echo client username to generate an auth token for
+    username: String,
+
+    /// email associated with the echo client
+    #[clap(default_value = "echo@musicaloverture.com")]
+    email: String,
+
     /// JSON file containing necessary secrets: jwt_key
     #[arg(long, value_name = "FILE")]
     secrets: PathBuf,
@@ -17,8 +24,8 @@ fn main() -> Result<()> {
     let jwt_key = parse_secrets(&args.secrets)?;
 
     let echo_claims = TokenClaims {
-        username: "echo-client".to_string(),
-        email: "info@gigroom.com".to_string(),
+        username: args.username,
+        email: args.email,
         // Set expiry as one year from now
         exp: jwt::get_current_timestamp() + (365 * 24 * 3600),
     };
