@@ -1,3 +1,4 @@
+use crate::TokenClaims;
 use anyhow::{anyhow, Error, Result};
 use futures::channel::{mpsc, oneshot};
 use futures::prelude::*;
@@ -11,7 +12,6 @@ use tokio::task;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
 use uuid::Uuid;
-use crate::TokenClaims;
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace, warn};
@@ -143,13 +143,13 @@ impl Server {
         };
 
         let (got_peer_id, client_version) = match serde_json::from_str::<IdentifyPayload>(ident) {
-            Ok(payload) => {
-                let Ok(claims) = self.parse_token(&payload.token) else {
-                    error!("Invalid auth token, disconnect");
+            Ok(payload) => match self.parse_token(&payload.token) {
+                Ok(claims) => (claims.username.to_string(), payload.client_version),
+                Err(err) => {
+                    error!("Invalid auth token {:?}, disconnect", err);
                     return None;
-                };
-                (claims.username.to_string(), payload.client_version)
-            }
+                }
+            },
             Err(_) => {
                 if !ident.is_ascii() || !ident.chars().all(char::is_alphanumeric) {
                     error!("Invalid legacy peer_id: {}, disconnect", ident);
