@@ -9,6 +9,7 @@ pub struct TokenClaims {
     pub username: String,
     pub email: String,
     pub exp: u64,
+    pub is_echo_client: Option<bool>,
 }
 
 pub fn parse_secrets(secrets_file: &std::path::Path) -> Result<String> {

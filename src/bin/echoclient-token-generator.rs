@@ -28,6 +28,7 @@ fn main() -> Result<()> {
         email: args.email,
         // Set expiry as one year from now
         exp: jwt::get_current_timestamp() + (365 * 24 * 3600),
+        is_echo_client: Some(true),
     };
 
     let token = jwt::encode(
