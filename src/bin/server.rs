@@ -37,6 +37,10 @@ struct Args {
     /// TLS certificate password (optional)
     #[clap(long)]
     cert_password: Option<String>,
+    /// If specified and different from @addr (specified above), we will accept TLS connections
+    /// only on this address, and @addr will only accept insecure connections
+    #[clap(long)]
+    tls_addr: Option<IpAddr>,
 
     /// JSON file containing necessary secrets: jwt_key
     #[arg(long, value_name = "FILE")]
@@ -127,39 +131,85 @@ async fn main() -> Result<()> {
     };
 
     // Create the event loop and TCP listener we'll accept connections on.
-    let listener = TcpListener::bind((args.addr, args.port)).await?;
-
-    info!("Listening on: {:?}", listener.local_addr());
-
-    loop {
-        let (stream, address) = match listener.accept().await {
-            Ok((s, a)) => (s, a),
-            Err(err) => {
-                warn!("Failed to accept TCP connection {:?}", err);
-                continue;
-            }
-        };
-
-        let mut server = server.clone();
-
-        if let Some(acceptor) = acceptor.clone() {
-            info!("Accepting TLS connection from {}", address);
-            task::spawn(async move {
-                match tokio::time::timeout(Duration::from_secs(5), acceptor.accept(stream)).await {
-                    Ok(Ok(stream)) => server.accept_async(stream).await,
-                    Ok(Err(err)) => {
-                        warn!("Failed to accept TLS connection: {:?}", err);
-                        Err(ServerError::TLSHandshake(err))
-                    }
-                    Err(elapsed) => {
-                        warn!("TLS connection timed out {} after {}", address, elapsed);
-                        Err(ServerError::TLSHandshakeTimeout(elapsed))
-                    }
-                }
-            });
-        } else {
-            info!("Accepting connection from {}", address);
-            task::spawn(async move { server.accept_async(stream).await });
+    let (tls_listener, insecure_listener) = match (&acceptor, args.tls_addr) {
+        (Some(_), Some(tls_addr)) => (
+            Some(TcpListener::bind((tls_addr, args.port)).await?),
+            Some(TcpListener::bind((args.addr, args.port)).await?),
+        ),
+        (Some(_), None) => (
+            Some(TcpListener::bind((args.addr, args.port)).await?),
+            None,
+        ),
+        (None, None) => (
+            None,
+            Some(TcpListener::bind((args.addr, args.port)).await?),
+        ),
+        (None, Some(_)) => {
+            bail!("--tls-addr option needs --chain and --key");
         }
+    };
+
+    let server_clone = server.clone();
+    let mut handles = vec![];
+    if let Some(acceptor) = acceptor {
+        let listener = tls_listener.unwrap();
+        let handle = tokio::spawn(async move {
+            info!("Listening with TLS on: {:?}", listener.local_addr());
+            loop {
+                let (stream, address) = match listener.accept().await {
+                    Ok((s, a)) => (s, a),
+                    Err(err) => {
+                        warn!("Failed to accept TCP connection {:?}", err);
+                        continue;
+                    }
+                };
+
+                let mut server = server_clone.clone();
+                let acceptor_clone = acceptor.clone();
+
+                info!("Accepting TLS connection from {}", address);
+                task::spawn(async move {
+                    match tokio::time::timeout(Duration::from_secs(5), acceptor_clone.accept(stream)).await {
+                        Ok(Ok(stream)) => server.accept_async(stream).await,
+                        Ok(Err(err)) => {
+                            warn!("Failed to accept TLS connection: {:?}", err);
+                            Err(ServerError::TLSHandshake(err))
+                        }
+                        Err(elapsed) => {
+                            warn!("TLS connection timed out {} after {}", address, elapsed);
+                            Err(ServerError::TLSHandshakeTimeout(elapsed))
+                        }
+                    }
+                });
+            }
+        });
+        handles.push(handle)
     }
+
+    if let Some(listener) = insecure_listener {
+        let handle = tokio::spawn(async move {
+            info!("Listening without TLS on: {:?}", listener.local_addr());
+            loop {
+                let (stream, address) = match listener.accept().await {
+                    Ok((s, a)) => (s, a),
+                    Err(err) => {
+                        warn!("Failed to accept TCP connection {:?}", err);
+                        continue;
+                    }
+                };
+
+                let mut server = server.clone();
+
+                info!("Accepting connection from {}", address);
+                task::spawn(async move { server.accept_async(stream).await });
+            }
+        });
+        handles.push(handle)
+    }
+
+    for handle in handles {
+        handle.await?;
+    }
+
+    Ok(())
 }
