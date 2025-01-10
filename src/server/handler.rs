@@ -2,11 +2,12 @@ use anyhow::Error;
 use futures::channel::{mpsc, oneshot};
 use futures::prelude::*;
 use http::status::StatusCode as HttpCode;
+use log::{log_enabled, Level::Debug};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
+use tokio_tungstenite::tungstenite::Message;
 use uuid::Uuid;
-use log::{log_enabled, Level::Debug};
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace, warn};
@@ -15,7 +16,7 @@ use crate::server::{Clients, Room, State};
 
 type Requests = Vec<HashMap<String, Value>>;
 // List of requests and the peer channel to send to
-type RequestList = Vec<(String, mpsc::Sender<String>)>;
+type RequestList = Vec<(String, mpsc::Sender<Message>)>;
 type Responses = Vec<Value>;
 
 pub struct Handler {}
@@ -23,7 +24,7 @@ pub struct Handler {}
 impl Handler {
     pub async fn cmd_loop(
         mut rx: mpsc::Receiver<String>,
-        mut tx: mpsc::Sender<String>,
+        mut tx: mpsc::Sender<Message>,
         ident: oneshot::Receiver<(Uuid, String)>,
         mut server_state: State,
     ) -> Result<(), Error> {
@@ -43,7 +44,7 @@ impl Handler {
                     Self::all_responses(&[Self::error_response(None, None, None)]).to_string()
                 }
             };
-            tx.send(rsp).await?;
+            tx.send(Message::Text(rsp)).await?;
         }
         info!("Exiting cmd_loop for {}", user_id);
         info!("{}", format!("{server_state:#?}"));
@@ -166,7 +167,7 @@ impl Handler {
         let mut futs = vec![];
         // Inform all other participants of the departure
         for (req, tx) in requests.iter_mut() {
-            futs.push(tx.send(req.clone()));
+            futs.push(tx.send(Message::Text(req.clone())));
         }
         futures::future::join_all(futs).await;
     }
@@ -193,7 +194,7 @@ impl Handler {
     fn client_ids_to_senders<'a, I>(
         client_ids: I,
         clients: &Arc<Mutex<Clients>>,
-    ) -> Vec<mpsc::Sender<String>>
+    ) -> Vec<mpsc::Sender<Message>>
     where
         I: Iterator<Item = &'a Uuid>,
     {

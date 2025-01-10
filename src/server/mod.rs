@@ -9,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::task;
+use tokio::time::{self, Duration};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
 use uuid::Uuid;
@@ -31,7 +32,7 @@ struct ClientInfo {
 pub struct Client {
     _conn_handle: task::JoinHandle<Result<(), Error>>,
     _cmdloop_handle: task::JoinHandle<Result<(), Error>>,
-    tx: mpsc::Sender<String>,
+    tx: mpsc::Sender<Message>,
 }
 
 #[derive(Debug)]
@@ -77,7 +78,7 @@ pub enum ServerError {
 
 #[derive(Clone, Debug)]
 pub enum WsMessage {
-    Outgoing(String),
+    Outgoing(Message),
     Incoming(Message),
 }
 
@@ -242,7 +243,7 @@ impl Server {
         let client_id = Uuid::new_v4();
         let client_id_clone = client_id;
 
-        let (tx, tx_src) = mpsc::channel::<String>(1000);
+        let (tx, tx_src) = mpsc::channel::<Message>(1000);
         let (mut rx_sink, rx) = mpsc::channel::<String>(1000);
         let (ident_sink, ident_src) = oneshot::channel::<(Uuid, String)>();
         let _cmdloop_handle = task::spawn(Handler::cmd_loop(
@@ -254,6 +255,7 @@ impl Server {
 
         let state_clone = self.state.clone();
         let self_clone = self.clone();
+        let mut ping_sender = tx.clone();
         let _conn_handle = task::spawn(async move {
             let (mut ws_sender, ws_receiver) = ws_conn.split();
             let mut incoming = Box::pin(ws_receiver.map(|msg| msg.map(WsMessage::Incoming)));
@@ -280,13 +282,25 @@ impl Server {
                 return Self::remove_client(state_clone, ws_sender, client_id).await;
             }
 
+            let ping_timer = task::spawn(async move {
+                let mut interval = time::interval(Duration::from_secs(30));
+                loop {
+                    interval.tick().await;
+                    if let Err(err) = ping_sender.send(Message::Ping((&[]).into())).await {
+                        info!("Failed to send ping to {}: {}", client_id, err);
+                        // For now, rely on TCP timeout to close the connection
+                        break;
+                    }
+                }
+            });
+
             let outgoing = Box::pin(tx_src.map(|msg| Ok(WsMessage::Outgoing(msg))));
             let s = vec![incoming.boxed(), outgoing.boxed()];
             let mut streams = futures::stream::select_all(s);
             loop {
                 match streams.next().await {
                     Some(Ok(WsMessage::Outgoing(msg))) => {
-                        ws_sender.send(Message::Text(msg)).await?;
+                        ws_sender.send(msg).await?;
                     }
                     Some(Ok(WsMessage::Incoming(Message::Text(msg)))) => {
                         info!("Received {}", msg);
@@ -301,7 +315,7 @@ impl Server {
                         ws_sender.send(Message::Pong(payload)).await?;
                     }
                     Some(Ok(WsMessage::Incoming(Message::Pong(_)))) => {
-                        trace!("Ignoring incoming pong, we do not send pings");
+                        info!("Received pong");
                     }
                     Some(Ok(WsMessage::Incoming(msg))) => {
                         warn!("Unsupported incoming message: {:?}", msg);
@@ -317,6 +331,7 @@ impl Server {
                 }
             }
 
+            ping_timer.abort();
             Self::remove_client(state_clone, ws_sender, client_id).await
         });
 
