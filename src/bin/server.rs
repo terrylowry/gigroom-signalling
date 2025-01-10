@@ -11,8 +11,8 @@ use tokio::net::TcpListener;
 use tokio_rustls::rustls::ServerConfig;
 use tokio_rustls::TlsAcceptor;
 
-use gigroom_signalling::server::{Server, ServerError};
 use gigroom_signalling::parse_secrets;
+use gigroom_signalling::server::{Server, ServerError};
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace, warn};
@@ -136,14 +136,8 @@ async fn main() -> Result<()> {
             Some(TcpListener::bind((tls_addr, args.port)).await?),
             Some(TcpListener::bind((args.addr, args.port)).await?),
         ),
-        (Some(_), None) => (
-            Some(TcpListener::bind((args.addr, args.port)).await?),
-            None,
-        ),
-        (None, None) => (
-            None,
-            Some(TcpListener::bind((args.addr, args.port)).await?),
-        ),
+        (Some(_), None) => (Some(TcpListener::bind((args.addr, args.port)).await?), None),
+        (None, None) => (None, Some(TcpListener::bind((args.addr, args.port)).await?)),
         (None, Some(_)) => {
             bail!("--tls-addr option needs --chain and --key");
         }
@@ -169,7 +163,12 @@ async fn main() -> Result<()> {
 
                 info!("Accepting TLS connection from {}", address);
                 task::spawn(async move {
-                    match tokio::time::timeout(Duration::from_secs(5), acceptor_clone.accept(stream)).await {
+                    match tokio::time::timeout(
+                        Duration::from_secs(5),
+                        acceptor_clone.accept(stream),
+                    )
+                    .await
+                    {
                         Ok(Ok(stream)) => server.accept_async(stream).await,
                         Ok(Err(err)) => {
                             warn!("Failed to accept TLS connection: {:?}", err);

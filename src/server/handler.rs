@@ -452,10 +452,7 @@ impl Handler {
                             "room_name".to_string(),
                             Value::String(room.name.to_string()),
                         );
-                        v.insert(
-                            "creator".to_string(),
-                            Value::String(room.creator.clone()),
-                        );
+                        v.insert("creator".to_string(), Value::String(room.creator.clone()));
                         let active = !room.current_clients.is_empty();
                         v.insert("active".to_string(), Value::Bool(active));
                         Value::Object(v)
@@ -724,7 +721,9 @@ impl Handler {
                                     // Collect a list of room members that need to be notified that
                                     // this peer has been kicked out of the room
                                     Ok(Some(Self::clients_request_builder(
-                                        room.current_clients.iter().filter(|id| to.contains(&Value::String(id.to_string()))),
+                                        room.current_clients.iter().filter(|id| {
+                                            to.contains(&Value::String(id.to_string()))
+                                        }),
                                         Some(&room_id),
                                         &[
                                             Value::String("room".to_string()),
@@ -765,7 +764,8 @@ impl Handler {
             .unzip()
             .0
             .unwrap_or(HttpCode::OK);
-        let args = response_args.unwrap_or_else(|(error, _)| Some(vec![Value::String(error.to_string())]));
+        let args =
+            response_args.unwrap_or_else(|(error, _)| Some(vec![Value::String(error.to_string())]));
         Self::make_response(code, args, Some(request_id))
     }
 
